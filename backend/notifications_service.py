@@ -781,32 +781,37 @@ BODY: [email body]""")
             logger.error(f"Payment {payment_id} not found")
             return []
         
-        entity_type = payment['entity_type']
-        entity_id = payment['entity_id']
+        # Use client_email from payment if available (for receive payments)
+        recipient_email = payment.get('client_email')
+        recipient_name = payment.get('client_name')
         
-        # Get entity email
-        recipient_email = None
-        recipient_name = None
-        
-        if entity_type == 'worker':
-            entity = get_worker(entity_id)
-            if entity:
-                recipient_email = entity.get('email')
-                recipient_name = entity.get('name')
-        elif entity_type == 'client':
-            entity = get_client(entity_id)
-            if entity:
-                recipient_email = entity.get('email')
-                recipient_name = entity.get('name')
-        elif entity_type == 'vendor':
-            entity = get_vendor(entity_id)
-            if entity:
-                recipient_email = entity.get('email')
-                recipient_name = entity.get('name')
+        # If client_email is not available, try to get from entity (for backward compatibility)
+        if not recipient_email:
+            entity_type = payment['entity_type']
+            entity_id = payment['entity_id']
+            
+            if entity_type == 'worker':
+                entity = get_worker(entity_id)
+                if entity:
+                    recipient_email = entity.get('email')
+                    recipient_name = entity.get('name')
+            elif entity_type == 'client':
+                entity = get_client(entity_id)
+                if entity:
+                    recipient_email = entity.get('email')
+                    recipient_name = entity.get('name')
+            elif entity_type == 'vendor':
+                entity = get_vendor(entity_id)
+                if entity:
+                    recipient_email = entity.get('email')
+                    recipient_name = entity.get('name')
         
         if not recipient_email:
-            logger.error(f"Could not find email for {entity_type} {entity_id}")
+            logger.error(f"Could not find email for payment {payment_id}")
             return []
+        
+        # Use 'client' as the entity type for receive payments with client_email
+        entity_type = 'client' if payment.get('payment_type') == 'receive' and recipient_email else payment.get('entity_type', 'client')
         
         # Create or get recipient
         from .notifications_db import list_recipients, create_recipient

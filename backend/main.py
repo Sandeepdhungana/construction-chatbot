@@ -25,10 +25,7 @@ from .notifications_db import (
     create_recipient, update_recipient, list_recipients, delete_recipient, get_recipient,
     create_schedule, update_schedule, list_schedules, delete_schedule, get_schedule,
     get_notification_history,
-    # ERP functions
-    create_worker, update_worker, get_worker, list_workers, delete_worker,
-    create_client, update_client, get_client, list_clients, delete_client,
-    create_vendor, update_vendor, get_vendor, list_vendors, delete_vendor,
+    # Payment functions
     create_payment, update_payment, get_payment, list_payments, delete_payment,
     get_payments_due_soon, get_overdue_payments
 )
@@ -460,144 +457,7 @@ async def get_notification_history_endpoint(limit: int = 100, recipient_id: Opti
     return {"history": history, "count": len(history)}
 
 
-# ==================== ERP API ENDPOINTS ====================
-
-# Workers endpoints
-@app.post("/api/erp/workers")
-async def create_worker_endpoint(worker: dict) -> dict:
-    """Create a new worker."""
-    try:
-        worker_id = create_worker(worker)
-        return {"success": True, "id": worker_id, "message": "Worker created"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/erp/workers")
-async def list_workers_endpoint(status: Optional[str] = None) -> dict:
-    """List all workers."""
-    workers = list_workers(status=status)
-    return {"workers": workers, "count": len(workers)}
-
-
-@app.get("/api/erp/workers/{worker_id}")
-async def get_worker_endpoint(worker_id: int) -> dict:
-    """Get a specific worker."""
-    worker = get_worker(worker_id)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    return {"worker": worker}
-
-
-@app.put("/api/erp/workers/{worker_id}")
-async def update_worker_endpoint(worker_id: int, worker: dict) -> dict:
-    """Update a worker."""
-    success = update_worker(worker_id, worker)
-    if not success:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    return {"success": True, "message": "Worker updated"}
-
-
-@app.delete("/api/erp/workers/{worker_id}")
-async def delete_worker_endpoint(worker_id: int) -> dict:
-    """Delete a worker."""
-    success = delete_worker(worker_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    return {"success": True, "message": "Worker deleted"}
-
-
-# Clients endpoints
-@app.post("/api/erp/clients")
-async def create_client_endpoint(client: dict) -> dict:
-    """Create a new client."""
-    try:
-        client_id = create_client(client)
-        return {"success": True, "id": client_id, "message": "Client created"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/erp/clients")
-async def list_clients_endpoint(status: Optional[str] = None) -> dict:
-    """List all clients."""
-    clients = list_clients(status=status)
-    return {"clients": clients, "count": len(clients)}
-
-
-@app.get("/api/erp/clients/{client_id}")
-async def get_client_endpoint(client_id: int) -> dict:
-    """Get a specific client."""
-    client = get_client(client_id)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return {"client": client}
-
-
-@app.put("/api/erp/clients/{client_id}")
-async def update_client_endpoint(client_id: int, client: dict) -> dict:
-    """Update a client."""
-    success = update_client(client_id, client)
-    if not success:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return {"success": True, "message": "Client updated"}
-
-
-@app.delete("/api/erp/clients/{client_id}")
-async def delete_client_endpoint(client_id: int) -> dict:
-    """Delete a client."""
-    success = delete_client(client_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return {"success": True, "message": "Client deleted"}
-
-
-# Vendors endpoints
-@app.post("/api/erp/vendors")
-async def create_vendor_endpoint(vendor: dict) -> dict:
-    """Create a new vendor."""
-    try:
-        vendor_id = create_vendor(vendor)
-        return {"success": True, "id": vendor_id, "message": "Vendor created"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/erp/vendors")
-async def list_vendors_endpoint(status: Optional[str] = None) -> dict:
-    """List all vendors."""
-    vendors = list_vendors(status=status)
-    return {"vendors": vendors, "count": len(vendors)}
-
-
-@app.get("/api/erp/vendors/{vendor_id}")
-async def get_vendor_endpoint(vendor_id: int) -> dict:
-    """Get a specific vendor."""
-    vendor = get_vendor(vendor_id)
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
-    return {"vendor": vendor}
-
-
-@app.put("/api/erp/vendors/{vendor_id}")
-async def update_vendor_endpoint(vendor_id: int, vendor: dict) -> dict:
-    """Update a vendor."""
-    success = update_vendor(vendor_id, vendor)
-    if not success:
-        raise HTTPException(status_code=404, detail="Vendor not found")
-    return {"success": True, "message": "Vendor updated"}
-
-
-@app.delete("/api/erp/vendors/{vendor_id}")
-async def delete_vendor_endpoint(vendor_id: int) -> dict:
-    """Delete a vendor."""
-    success = delete_vendor(vendor_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Vendor not found")
-    return {"success": True, "message": "Vendor deleted"}
-
-
-# Payments endpoints
+# ==================== PAYMENTS API ENDPOINTS ====================
 @app.post("/api/erp/payments")
 async def create_payment_endpoint(payment: dict) -> dict:
     """Create a new payment record."""

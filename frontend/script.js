@@ -49,17 +49,17 @@ navButtons.forEach(button => {
                 loadSMTPConfigs();
             }
         } else if (viewName === "erp") {
-            // Activate Workers tab
-            const workersTab = viewElement.querySelector('[data-tab="workers"]');
-            const workersTabContent = viewElement.querySelector('#workers-tab');
-            if (workersTab && workersTabContent) {
+            // Activate Payments tab
+            const paymentsTab = viewElement.querySelector('[data-tab="payments"]');
+            const paymentsTabContent = viewElement.querySelector('#payments-tab');
+            if (paymentsTab && paymentsTabContent) {
                 // Remove active from all ERP tabs
                 viewElement.querySelectorAll('#erp-view .tab-button').forEach(t => t.classList.remove("active"));
                 viewElement.querySelectorAll('#erp-view .tab-content').forEach(c => c.classList.remove("active"));
-                // Activate Workers tab
-                workersTab.classList.add("active");
-                workersTabContent.classList.add("active");
-                loadWorkers();
+                // Activate Payments tab
+                paymentsTab.classList.add("active");
+                paymentsTabContent.classList.add("active");
+                loadPayments();
             }
         }
     });
@@ -890,9 +890,6 @@ navButtons.forEach(button => {
             loadSchedules();
             loadHistory();
         } else if (button.dataset.view === "erp") {
-            loadWorkers();
-            loadClients();
-            loadVendors();
             loadPayments();
         }
     });
@@ -916,15 +913,12 @@ erpTabs.forEach(tab => {
 
 // Generate Mock Data
 document.getElementById("generate-mock-data-btn")?.addEventListener("click", async () => {
-    if (!confirm("Generate mock ERP data? This will add sample workers, clients, vendors, and payments.")) return;
+    if (!confirm("Generate mock payment data? This will add sample payments.")) return;
     try {
         const response = await fetch("/api/erp/generate-mock-data", { method: "POST" });
         const data = await response.json();
         if (data.success) {
             alert("Mock data generated successfully!");
-            loadWorkers();
-            loadClients();
-            loadVendors();
             loadPayments();
         } else {
             alert("Error generating mock data");
@@ -934,363 +928,6 @@ document.getElementById("generate-mock-data-btn")?.addEventListener("click", asy
     }
 });
 
-// Workers Functions
-document.getElementById("add-worker-btn")?.addEventListener("click", () => {
-    document.getElementById("worker-modal-title").textContent = "Add Worker";
-    document.getElementById("worker-form").reset();
-    document.getElementById("worker-id").value = "";
-    document.getElementById("worker-status").value = "active";
-    document.getElementById("worker-modal").classList.add("active");
-});
-
-document.getElementById("close-worker-modal-btn")?.addEventListener("click", () => {
-    document.getElementById("worker-modal").classList.remove("active");
-});
-
-// Close worker modal on outside click or Escape
-const workerModal = document.getElementById("worker-modal");
-workerModal?.addEventListener("click", (e) => {
-    if (e.target === workerModal) {
-        workerModal.classList.remove("active");
-    }
-});
-document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && workerModal?.classList.contains("active")) {
-        workerModal.classList.remove("active");
-    }
-});
-
-document.getElementById("worker-status-filter")?.addEventListener("change", () => {
-    loadWorkers();
-});
-
-document.getElementById("worker-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const id = document.getElementById("worker-id").value;
-    const data = {
-        name: document.getElementById("worker-name").value,
-        email: document.getElementById("worker-email").value,
-        phone: document.getElementById("worker-phone").value,
-        role: document.getElementById("worker-role").value,
-        hourly_rate: parseFloat(document.getElementById("worker-hourly-rate").value) || 0,
-        status: document.getElementById("worker-status").value,
-        hire_date: document.getElementById("worker-hire-date").value || null,
-        address: document.getElementById("worker-address").value,
-        notes: document.getElementById("worker-notes").value
-    };
-    
-    try {
-        const url = id ? `/api/erp/workers/${id}` : "/api/erp/workers";
-        const method = id ? "PUT" : "POST";
-        const response = await fetch(url, {
-            method,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data)
-        });
-        if (response.ok) {
-            document.getElementById("worker-modal").classList.remove("active");
-            loadWorkers();
-        } else {
-            alert("Error saving worker");
-        }
-    } catch (error) {
-        alert("Error: " + error.message);
-    }
-});
-
-async function loadWorkers() {
-    try {
-        const status = document.getElementById("worker-status-filter")?.value || "";
-        const url = status ? `/api/erp/workers?status=${status}` : "/api/erp/workers";
-        const response = await fetch(url);
-        const data = await response.json();
-        const list = document.getElementById("workers-list");
-        list.innerHTML = data.workers.length === 0
-            ? "<div class='empty-state'><p>No workers found. Add one or generate mock data.</p></div>"
-            : data.workers.map(w => `
-                <div class="erp-card">
-                    <h3>${w.name}</h3>
-                    <p><strong>Role:</strong> ${w.role || 'N/A'}</p>
-                    <p><strong>Email:</strong> ${w.email}</p>
-                    <p><strong>Hourly Rate:</strong> $${(w.hourly_rate || 0).toFixed(2)}</p>
-                    <p><strong>Status:</strong> ${w.status}</p>
-                    <div class="card-actions">
-                        <button onclick="editWorker(${w.id})">Edit</button>
-                        <button onclick="deleteWorker(${w.id})" class="delete-btn">Delete</button>
-                    </div>
-                </div>
-            `).join("");
-    } catch (error) {
-        console.error("Error loading workers:", error);
-    }
-}
-
-window.editWorker = async function(id) {
-    const response = await fetch(`/api/erp/workers/${id}`);
-    const data = await response.json();
-    const w = data.worker;
-    document.getElementById("worker-id").value = id;
-    document.getElementById("worker-name").value = w.name;
-    document.getElementById("worker-email").value = w.email;
-    document.getElementById("worker-phone").value = w.phone || "";
-    document.getElementById("worker-role").value = w.role || "";
-    document.getElementById("worker-hourly-rate").value = w.hourly_rate || 0;
-    document.getElementById("worker-status").value = w.status;
-    document.getElementById("worker-hire-date").value = w.hire_date || "";
-    document.getElementById("worker-address").value = w.address || "";
-    document.getElementById("worker-notes").value = w.notes || "";
-    document.getElementById("worker-modal-title").textContent = "Edit Worker";
-    document.getElementById("worker-modal").classList.add("active");
-};
-
-window.deleteWorker = async function(id) {
-    if (!confirm("Delete this worker?")) return;
-    try {
-        const response = await fetch(`/api/erp/workers/${id}`, { method: "DELETE" });
-        if (response.ok) loadWorkers();
-    } catch (error) {
-        alert("Error deleting worker");
-    }
-};
-
-// Clients Functions
-document.getElementById("add-client-btn")?.addEventListener("click", () => {
-    document.getElementById("client-modal-title").textContent = "Add Client";
-    document.getElementById("client-form").reset();
-    document.getElementById("client-id").value = "";
-    document.getElementById("client-status").value = "active";
-    document.getElementById("client-modal").classList.add("active");
-});
-
-document.getElementById("close-client-modal-btn")?.addEventListener("click", () => {
-    document.getElementById("client-modal").classList.remove("active");
-});
-
-// Close client modal on outside click or Escape
-const clientModal = document.getElementById("client-modal");
-clientModal?.addEventListener("click", (e) => {
-    if (e.target === clientModal) {
-        clientModal.classList.remove("active");
-    }
-});
-document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && clientModal?.classList.contains("active")) {
-        clientModal.classList.remove("active");
-    }
-});
-
-document.getElementById("client-status-filter")?.addEventListener("change", () => {
-    loadClients();
-});
-
-document.getElementById("client-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const id = document.getElementById("client-id").value;
-    const data = {
-        name: document.getElementById("client-name").value,
-        company_name: document.getElementById("client-company-name").value,
-        email: document.getElementById("client-email").value,
-        phone: document.getElementById("client-phone").value,
-        contact_person: document.getElementById("client-contact-person").value,
-        status: document.getElementById("client-status").value,
-        address: document.getElementById("client-address").value,
-        notes: document.getElementById("client-notes").value
-    };
-    
-    try {
-        const url = id ? `/api/erp/clients/${id}` : "/api/erp/clients";
-        const method = id ? "PUT" : "POST";
-        const response = await fetch(url, {
-            method,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data)
-        });
-        if (response.ok) {
-            document.getElementById("client-modal").classList.remove("active");
-            loadClients();
-        } else {
-            alert("Error saving client");
-        }
-    } catch (error) {
-        alert("Error: " + error.message);
-    }
-});
-
-async function loadClients() {
-    try {
-        const status = document.getElementById("client-status-filter")?.value || "";
-        const url = status ? `/api/erp/clients?status=${status}` : "/api/erp/clients";
-        const response = await fetch(url);
-        const data = await response.json();
-        const list = document.getElementById("clients-list");
-        list.innerHTML = data.clients.length === 0
-            ? "<div class='empty-state'><p>No clients found. Add one or generate mock data.</p></div>"
-            : data.clients.map(c => `
-                <div class="erp-card">
-                    <h3>${c.name}</h3>
-                    <p><strong>Company:</strong> ${c.company_name || 'N/A'}</p>
-                    <p><strong>Email:</strong> ${c.email}</p>
-                    <p><strong>Status:</strong> ${c.status}</p>
-                    <div class="card-actions">
-                        <button onclick="editClient(${c.id})">Edit</button>
-                        <button onclick="deleteClient(${c.id})" class="delete-btn">Delete</button>
-                    </div>
-                </div>
-            `).join("");
-    } catch (error) {
-        console.error("Error loading clients:", error);
-    }
-}
-
-window.editClient = async function(id) {
-    const response = await fetch(`/api/erp/clients/${id}`);
-    const data = await response.json();
-    const c = data.client;
-    document.getElementById("client-id").value = id;
-    document.getElementById("client-name").value = c.name;
-    document.getElementById("client-company-name").value = c.company_name || "";
-    document.getElementById("client-email").value = c.email;
-    document.getElementById("client-phone").value = c.phone || "";
-    document.getElementById("client-contact-person").value = c.contact_person || "";
-    document.getElementById("client-status").value = c.status;
-    document.getElementById("client-address").value = c.address || "";
-    document.getElementById("client-notes").value = c.notes || "";
-    document.getElementById("client-modal-title").textContent = "Edit Client";
-    document.getElementById("client-modal").classList.add("active");
-};
-
-window.deleteClient = async function(id) {
-    if (!confirm("Delete this client?")) return;
-    try {
-        const response = await fetch(`/api/erp/clients/${id}`, { method: "DELETE" });
-        if (response.ok) loadClients();
-    } catch (error) {
-        alert("Error deleting client");
-    }
-};
-
-// Vendors Functions
-document.getElementById("add-vendor-btn")?.addEventListener("click", () => {
-    document.getElementById("vendor-modal-title").textContent = "Add Vendor";
-    document.getElementById("vendor-form").reset();
-    document.getElementById("vendor-id").value = "";
-    document.getElementById("vendor-status").value = "active";
-    document.getElementById("vendor-modal").classList.add("active");
-});
-
-document.getElementById("close-vendor-modal-btn")?.addEventListener("click", () => {
-    document.getElementById("vendor-modal").classList.remove("active");
-});
-
-// Close vendor modal on outside click or Escape
-const vendorModal = document.getElementById("vendor-modal");
-vendorModal?.addEventListener("click", (e) => {
-    if (e.target === vendorModal) {
-        vendorModal.classList.remove("active");
-    }
-});
-document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && vendorModal?.classList.contains("active")) {
-        vendorModal.classList.remove("active");
-    }
-});
-
-document.getElementById("vendor-status-filter")?.addEventListener("change", () => {
-    loadVendors();
-});
-
-document.getElementById("vendor-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const id = document.getElementById("vendor-id").value;
-    const data = {
-        name: document.getElementById("vendor-name").value,
-        company_name: document.getElementById("vendor-company-name").value,
-        email: document.getElementById("vendor-email").value,
-        phone: document.getElementById("vendor-phone").value,
-        vendor_type: document.getElementById("vendor-type").value,
-        payment_terms: document.getElementById("vendor-payment-terms").value,
-        contact_person: document.getElementById("vendor-contact-person").value,
-        status: document.getElementById("vendor-status").value,
-        address: document.getElementById("vendor-address").value,
-        notes: document.getElementById("vendor-notes").value
-    };
-    
-    try {
-        const url = id ? `/api/erp/vendors/${id}` : "/api/erp/vendors";
-        const method = id ? "PUT" : "POST";
-        const response = await fetch(url, {
-            method,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data)
-        });
-        if (response.ok) {
-            document.getElementById("vendor-modal").classList.remove("active");
-            loadVendors();
-        } else {
-            alert("Error saving vendor");
-        }
-    } catch (error) {
-        alert("Error: " + error.message);
-    }
-});
-
-async function loadVendors() {
-    try {
-        const status = document.getElementById("vendor-status-filter")?.value || "";
-        const url = status ? `/api/erp/vendors?status=${status}` : "/api/erp/vendors";
-        const response = await fetch(url);
-        const data = await response.json();
-        const list = document.getElementById("vendors-list");
-        list.innerHTML = data.vendors.length === 0
-            ? "<div class='empty-state'><p>No vendors found. Add one or generate mock data.</p></div>"
-            : data.vendors.map(v => `
-                <div class="erp-card">
-                    <h3>${v.name}</h3>
-                    <p><strong>Company:</strong> ${v.company_name}</p>
-                    <p><strong>Type:</strong> ${v.vendor_type || 'N/A'}</p>
-                    <p><strong>Email:</strong> ${v.email}</p>
-                    <p><strong>Payment Terms:</strong> ${v.payment_terms || 'N/A'}</p>
-                    <p><strong>Status:</strong> ${v.status}</p>
-                    <div class="card-actions">
-                        <button onclick="editVendor(${v.id})">Edit</button>
-                        <button onclick="deleteVendor(${v.id})" class="delete-btn">Delete</button>
-                    </div>
-                </div>
-            `).join("");
-    } catch (error) {
-        console.error("Error loading vendors:", error);
-    }
-}
-
-window.editVendor = async function(id) {
-    const response = await fetch(`/api/erp/vendors/${id}`);
-    const data = await response.json();
-    const v = data.vendor;
-    document.getElementById("vendor-id").value = id;
-    document.getElementById("vendor-name").value = v.name;
-    document.getElementById("vendor-company-name").value = v.company_name;
-    document.getElementById("vendor-email").value = v.email;
-    document.getElementById("vendor-phone").value = v.phone || "";
-    document.getElementById("vendor-type").value = v.vendor_type || "";
-    document.getElementById("vendor-payment-terms").value = v.payment_terms || "";
-    document.getElementById("vendor-contact-person").value = v.contact_person || "";
-    document.getElementById("vendor-status").value = v.status;
-    document.getElementById("vendor-address").value = v.address || "";
-    document.getElementById("vendor-notes").value = v.notes || "";
-    document.getElementById("vendor-modal-title").textContent = "Edit Vendor";
-    document.getElementById("vendor-modal").classList.add("active");
-};
-
-window.deleteVendor = async function(id) {
-    if (!confirm("Delete this vendor?")) return;
-    try {
-        const response = await fetch(`/api/erp/vendors/${id}`, { method: "DELETE" });
-        if (response.ok) loadVendors();
-    } catch (error) {
-        alert("Error deleting vendor");
-    }
-};
-
 // Payments Functions
 document.getElementById("add-payment-btn")?.addEventListener("click", async () => {
     document.getElementById("payment-modal-title").textContent = "Add Payment";
@@ -1298,7 +935,6 @@ document.getElementById("add-payment-btn")?.addEventListener("click", async () =
     document.getElementById("payment-id").value = "";
     document.getElementById("payment-status").value = "pending";
     document.getElementById("payment-type").value = "receive";
-    await loadEntitiesForPayment();
     updatePaymentFormFields();
     document.getElementById("payment-modal").classList.add("active");
 });
@@ -1356,121 +992,50 @@ document.getElementById("payment-entity-search")?.addEventListener("input", (e) 
 
 function updatePaymentFormFields() {
     const paymentType = document.getElementById("payment-type")?.value;
-    const workerGroup = document.getElementById("payment-worker")?.closest(".form-group");
-    const clientGroup = document.getElementById("payment-client")?.closest(".form-group");
-    const vendorGroup = document.getElementById("payment-vendor")?.closest(".form-group");
+    const clientFieldsGroup = document.getElementById("client-fields-group");
+    const clientEmailGroup = document.getElementById("client-email-group");
     
     if (paymentType === "receive") {
-        // Receive from client - show client only
-        if (clientGroup) clientGroup.style.display = "block";
-        if (workerGroup) workerGroup.style.display = "none";
-        if (vendorGroup) vendorGroup.style.display = "none";
-        // Clear worker and vendor selections
-        if (document.getElementById("payment-worker")) document.getElementById("payment-worker").value = "";
-        if (document.getElementById("payment-vendor")) document.getElementById("payment-vendor").value = "";
+        // Receive from client - show client name and email fields
+        if (clientFieldsGroup) clientFieldsGroup.style.display = "block";
+        if (clientEmailGroup) clientEmailGroup.style.display = "block";
     } else if (paymentType === "send") {
-        // Send to worker or vendor - show worker and vendor only
-        if (clientGroup) clientGroup.style.display = "none";
-        if (workerGroup) workerGroup.style.display = "block";
-        if (vendorGroup) vendorGroup.style.display = "block";
-        // Clear client selection
-        if (document.getElementById("payment-client")) document.getElementById("payment-client").value = "";
+        // Send to worker or vendor - hide client fields
+        if (clientFieldsGroup) clientFieldsGroup.style.display = "none";
+        if (clientEmailGroup) clientEmailGroup.style.display = "none";
     }
 }
 
-async function loadEntitiesForPayment() {
-    try {
-        // Load workers
-        const workersResponse = await fetch("/api/erp/workers");
-        const workersData = await workersResponse.json();
-        const workerSelect = document.getElementById("payment-worker");
-        if (workerSelect) {
-            workerSelect.innerHTML = "<option value=''>None</option>";
-            (workersData.workers || []).forEach(w => {
-                const option = document.createElement("option");
-                option.value = w.id;
-                option.textContent = `${w.name}${w.role ? ` - ${w.role}` : ''}`;
-                workerSelect.appendChild(option);
-            });
-        }
-        
-        // Load clients
-        const clientsResponse = await fetch("/api/erp/clients");
-        const clientsData = await clientsResponse.json();
-        const clientSelect = document.getElementById("payment-client");
-        if (clientSelect) {
-            clientSelect.innerHTML = "<option value=''>None</option>";
-            (clientsData.clients || []).forEach(c => {
-                const option = document.createElement("option");
-                option.value = c.id;
-                option.textContent = `${c.name}${c.company_name ? ` (${c.company_name})` : ''}`;
-                clientSelect.appendChild(option);
-            });
-        }
-        
-        // Load vendors
-        const vendorsResponse = await fetch("/api/erp/vendors");
-        const vendorsData = await vendorsResponse.json();
-        const vendorSelect = document.getElementById("payment-vendor");
-        if (vendorSelect) {
-            vendorSelect.innerHTML = "<option value=''>None</option>";
-            (vendorsData.vendors || []).forEach(v => {
-                const option = document.createElement("option");
-                option.value = v.id;
-                option.textContent = `${v.name}${v.company_name ? ` (${v.company_name})` : ''}`;
-                vendorSelect.appendChild(option);
-            });
-        }
-    } catch (error) {
-        console.error("Error loading entities for payment:", error);
-    }
-}
 
 document.getElementById("payment-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const id = document.getElementById("payment-id").value;
     const paymentType = document.getElementById("payment-type").value;
     
-    // Determine entity_type and entity_id based on payment type
-    let entityType = null;
-    let entityId = null;
+    // Get client name and email for receive payments
+    let clientName = "";
+    let clientEmail = "";
     
     if (paymentType === "receive") {
-        // Receiving from client
-        const clientId = document.getElementById("payment-client").value;
-        if (!clientId) {
-            alert("Please select a client");
-            return;
-        }
-        entityType = "client";
-        entityId = parseInt(clientId);
-    } else if (paymentType === "send") {
-        // Sending to worker or vendor
-        const workerId = document.getElementById("payment-worker").value;
-        const vendorId = document.getElementById("payment-vendor").value;
+        clientName = document.getElementById("payment-client-name").value.trim();
+        clientEmail = document.getElementById("payment-client-email").value.trim();
         
-        if (!workerId && !vendorId) {
-            alert("Please select either a worker or vendor");
+        if (!clientName) {
+            alert("Please enter client name");
             return;
         }
-        if (workerId && vendorId) {
-            alert("Please select either a worker OR a vendor, not both");
+        if (!clientEmail) {
+            alert("Please enter client email");
             return;
-        }
-        
-        if (workerId) {
-            entityType = "worker";
-            entityId = parseInt(workerId);
-        } else {
-            entityType = "vendor";
-            entityId = parseInt(vendorId);
         }
     }
     
     const data = {
         payment_type: paymentType,
-        entity_type: entityType,
-        entity_id: entityId,
+        entity_type: paymentType === "receive" ? "client" : "other",
+        entity_id: 0,
+        client_name: clientName,
+        client_email: clientEmail,
         amount: parseFloat(document.getElementById("payment-amount").value),
         due_date: document.getElementById("payment-due-date").value,
         invoice_number: document.getElementById("payment-invoice-number").value || null,
@@ -1521,38 +1086,19 @@ async function loadPayments() {
         const overdueData = await overdueResponse.json();
         document.getElementById("overdue-count").textContent = overdueData.count || 0;
         
-        // Load entity names
-        const workersResponse = await fetch("/api/erp/workers");
-        const workersData = await workersResponse.json();
-        const workers = workersData.workers || [];
-        
-        const clientsResponse = await fetch("/api/erp/clients");
-        const clientsData = await clientsResponse.json();
-        const clients = clientsData.clients || [];
-        
-        const vendorsResponse = await fetch("/api/erp/vendors");
-        const vendorsData = await vendorsResponse.json();
-        const vendors = vendorsData.vendors || [];
-        
-        const getEntityName = (entityType, entityId) => {
-            if (entityType === 'worker') {
-                const w = workers.find(x => x.id === entityId);
-                return w ? w.name : `Worker #${entityId}`;
-            } else if (entityType === 'client') {
-                const c = clients.find(x => x.id === entityId);
-                return c ? c.name : `Client #${entityId}`;
-            } else if (entityType === 'vendor') {
-                const v = vendors.find(x => x.id === entityId);
-                return v ? v.name : `Vendor #${entityId}`;
+        const getEntityName = (payment) => {
+            // Use client_name if available, otherwise fallback to entity_type
+            if (payment.client_name) {
+                return payment.client_name;
             }
-            return `${entityType} #${entityId}`;
+            return `${payment.entity_type} #${payment.entity_id}`;
         };
         
         // Filter payments by search query
         let filteredPayments = data.payments;
         if (searchQuery) {
             filteredPayments = data.payments.filter(p => {
-                const entityName = getEntityName(p.entity_type, p.entity_id).toLowerCase();
+                const entityName = getEntityName(p).toLowerCase();
                 return entityName.includes(searchQuery);
             });
         }
@@ -1592,7 +1138,7 @@ async function loadPayments() {
                     ${paymentsWithReminders.map(p => `
                         <tr class="${p.status === 'overdue' ? 'overdue-row' : ''}">
                             <td>${p.payment_type === 'receive' ? '📥 Receive' : '📤 Send'}</td>
-                            <td>${getEntityName(p.entity_type, p.entity_id)}</td>
+                            <td>${getEntityName(p)}</td>
                             <td>$${parseFloat(p.amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
                             <td>${p.due_date}</td>
                             <td><span class="status-badge status-${p.status}">${p.status}</span></td>
@@ -1627,17 +1173,14 @@ window.editPayment = async function(id) {
     document.getElementById("payment-status").value = p.status;
     document.getElementById("payment-link").value = p.payment_link || "";
     
-    // Load entities and populate the correct dropdown based on entity_type
-    await loadEntitiesForPayment();
     updatePaymentFormFields();
     
-    // Set the correct entity dropdown based on entity_type
-    if (p.entity_type === "client") {
-        document.getElementById("payment-client").value = p.entity_id;
-    } else if (p.entity_type === "worker") {
-        document.getElementById("payment-worker").value = p.entity_id;
-    } else if (p.entity_type === "vendor") {
-        document.getElementById("payment-vendor").value = p.entity_id;
+    // Set client name and email if available
+    if (p.client_name) {
+        document.getElementById("payment-client-name").value = p.client_name;
+    }
+    if (p.client_email) {
+        document.getElementById("payment-client-email").value = p.client_email;
     }
     
     document.getElementById("payment-modal-title").textContent = "Edit Payment";

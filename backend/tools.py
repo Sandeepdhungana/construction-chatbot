@@ -520,24 +520,35 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
             description=(
                 "MANDATORY FOR CSV/EXCEL QUERIES: Use to query ANY uploaded spreadsheet table (CSV or Excel) using natural language. "
                 "ALWAYS call List_Available_Tables FIRST to see what tables and columns exist. "
+                "CRITICAL: If multiple CSV/Excel files exist, you MUST search MULTIPLE tables, not just one. "
                 "This tool automatically understands table structures, finds relevant columns, and can perform filtering (>, <, >=, <=, =, !=, contains, in/not in), "
                 "grouping, aggregations (sum, avg, count, min, max), and basic analysis. "
                 "You can specify a table name with 'table=<name>::question=<query>' or just ask a question and the tool will infer the right table(s) and columns. "
+                "IMPORTANT: When multiple tables exist, call this tool MULTIPLE times - once for each relevant table. "
+                "For example, if you have 'workers.csv' and 'payments.csv', search BOTH when asked about worker payments. "
                 "This is the PRIMARY tool for structured data queries. "
                 "USE THIS PROACTIVELY for questions about timelines, schedules, durations, costs, budgets, quantities, resources, etc. "
-                "If a question involves numbers, dates, or calculations, search spreadsheets automatically. "
+                "If a question involves numbers, dates, or calculations, search spreadsheets automatically across ALL relevant tables. "
                 "ALWAYS use this tool when CSV/Excel data exists - don't skip spreadsheet searches. "
-                "Use together with ERP tools and document retrievers for comprehensive answers."
+                "After searching one table, check if other tables might have relevant information and search those too. "
+                "Use together with Multi_Table_Analysis_Tool for cross-table queries, and with ERP tools and document retrievers for comprehensive answers."
             ),
         ),
         Tool(
             name="Multi_Table_Analysis_Tool",
             func=_multi_table_analysis_runner(llm),
             description=(
-                "Use for complex operations across multiple spreadsheet tables. "
+                "MANDATORY FOR MULTI-TABLE QUERIES: Use for complex operations across MULTIPLE spreadsheet tables. "
+                "CRITICAL: When information spans multiple CSV/Excel files, you MUST use this tool to combine data. "
                 "Supports joining tables, cross-table filtering, aggregations across tables, and combining data from multiple sources. "
-                "Format: 'tables=<table1,table2>::operation=<description>' or use natural language describing the multi-table operation. "
-                "The tool will automatically infer relationships and join keys when possible."
+                "Format: 'tables=<table1,table2,table3>::operation=<description>' or use natural language describing the multi-table operation. "
+                "The tool will automatically infer relationships and join keys when possible. "
+                "Examples: "
+                "'tables=workers,materials::operation=Find which workers are assigned to which materials' "
+                "'tables=payments,invoices,projects::operation=Calculate total revenue per project' "
+                "'tables=schedule,tasks::operation=Find tasks that are behind schedule' "
+                "ALWAYS use this when you need to combine information from multiple CSV/Excel files. "
+                "Don't just search one table - if multiple tables have relevant data, use this tool to analyze them together."
             ),
         ),
         StructuredTool.from_function(
@@ -609,40 +620,7 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
             ),
         ),
         
-        # ERP Tools
-        Tool(
-            name="List_Workers",
-            func=lambda query="": _list_workers_runner(query),
-            description=(
-                "MANDATORY FOR WORKER QUESTIONS: List all workers in the ERP system. Shows worker names, roles, hourly rates, and status. "
-                "ALWAYS call this when questions involve workers, employees, or staff. "
-                "Also search CSV/Excel tables and documents for comprehensive worker information. "
-                "Optional query can filter by status: 'active', 'inactive', or 'terminated'. "
-                "Use this tool together with Generic_Spreadsheet_Query_Tool and document retrievers for complete answers."
-            ),
-        ),
-        Tool(
-            name="List_Clients",
-            func=lambda query="": _list_clients_runner(query),
-            description=(
-                "MANDATORY FOR CLIENT QUESTIONS: List all clients in the ERP system. Shows client names, companies, contact info, and status. "
-                "ALWAYS call this when questions involve clients or customers. "
-                "Also search CSV/Excel tables and documents for comprehensive client information. "
-                "Optional query can filter by status: 'active', 'inactive', or 'completed'. "
-                "Use this tool together with Generic_Spreadsheet_Query_Tool and document retrievers for complete answers."
-            ),
-        ),
-        Tool(
-            name="List_Vendors",
-            func=lambda query="": _list_vendors_runner(query),
-            description=(
-                "MANDATORY FOR VENDOR QUESTIONS: List all vendors in the ERP system. Shows vendor names, companies, types, payment terms, and status. "
-                "ALWAYS call this when questions involve vendors or suppliers. "
-                "Also search CSV/Excel tables and documents for comprehensive vendor information. "
-                "Optional query can filter by status: 'active', 'inactive', or 'blacklisted'. "
-                "Use this tool together with Generic_Spreadsheet_Query_Tool and document retrievers for complete answers."
-            ),
-        ),
+        # Payment Tools
         Tool(
             name="List_Payments",
             func=lambda query="": _list_payments_runner(query),
@@ -838,111 +816,12 @@ def _get_notification_history_runner(query: str = "") -> str:
         return f"Error getting notification history: {str(e)}"
 
 
-# ERP tool runners
-def _list_workers_runner(query: str = "") -> str:
-    """List workers."""
-    try:
-        from .notifications_db import list_workers
-        
-        status = None
-        if isinstance(query, dict):
-            status = query.get('status') or query.get('__arg1', '')
-        else:
-            status = str(query).strip() if query else None
-        
-        if status and status.lower() in ['active', 'inactive', 'terminated']:
-            workers = list_workers(status=status.lower())
-        else:
-            workers = list_workers()
-        
-        if not workers:
-            return "No workers found in ERP system."
-        
-        result_lines = [f"\n📋 Workers ({len(workers)} total):"]
-        for w in workers:
-            result_lines.append(f"\n  ID: {w['id']} - {w['name']}")
-            result_lines.append(f"    Role: {w.get('role', 'N/A')}")
-            result_lines.append(f"    Email: {w.get('email', 'N/A')}")
-            result_lines.append(f"    Hourly Rate: ${w.get('hourly_rate', 0):.2f}")
-            result_lines.append(f"    Status: {w.get('status', 'N/A')}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in List_Workers tool: {e}")
-        return f"Error listing workers: {str(e)}"
-
-
-def _list_clients_runner(query: str = "") -> str:
-    """List clients."""
-    try:
-        from .notifications_db import list_clients
-        
-        status = None
-        if isinstance(query, dict):
-            status = query.get('status') or query.get('__arg1', '')
-        else:
-            status = str(query).strip() if query else None
-        
-        if status and status.lower() in ['active', 'inactive', 'completed']:
-            clients = list_clients(status=status.lower())
-        else:
-            clients = list_clients()
-        
-        if not clients:
-            return "No clients found in ERP system."
-        
-        result_lines = [f"\n📋 Clients ({len(clients)} total):"]
-        for c in clients:
-            result_lines.append(f"\n  ID: {c['id']} - {c['name']}")
-            result_lines.append(f"    Company: {c.get('company_name', 'N/A')}")
-            result_lines.append(f"    Email: {c.get('email', 'N/A')}")
-            result_lines.append(f"    Status: {c.get('status', 'N/A')}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in List_Clients tool: {e}")
-        return f"Error listing clients: {str(e)}"
-
-
-def _list_vendors_runner(query: str = "") -> str:
-    """List vendors."""
-    try:
-        from .notifications_db import list_vendors
-        
-        status = None
-        if isinstance(query, dict):
-            status = query.get('status') or query.get('__arg1', '')
-        else:
-            status = str(query).strip() if query else None
-        
-        if status and status.lower() in ['active', 'inactive', 'blacklisted']:
-            vendors = list_vendors(status=status.lower())
-        else:
-            vendors = list_vendors()
-        
-        if not vendors:
-            return "No vendors found in ERP system."
-        
-        result_lines = [f"\n📋 Vendors ({len(vendors)} total):"]
-        for v in vendors:
-            result_lines.append(f"\n  ID: {v['id']} - {v['name']}")
-            result_lines.append(f"    Company: {v.get('company_name', 'N/A')}")
-            result_lines.append(f"    Type: {v.get('vendor_type', 'N/A')}")
-            result_lines.append(f"    Email: {v.get('email', 'N/A')}")
-            result_lines.append(f"    Payment Terms: {v.get('payment_terms', 'N/A')}")
-            result_lines.append(f"    Status: {v.get('status', 'N/A')}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in List_Vendors tool: {e}")
-        return f"Error listing vendors: {str(e)}"
-
-
+# Payment tool runners
 def _list_payments_runner(query: str = "") -> str:
     """List payments."""
     try:
         import json
-        from .notifications_db import list_payments, get_worker, get_client, get_vendor
+        from .notifications_db import list_payments
         
         payment_type = None
         entity_type = None
@@ -978,18 +857,6 @@ def _list_payments_runner(query: str = "") -> str:
             
             # Get entity name
             entity_name = f"{entity_type} {entity_id}"
-            if entity_type == 'worker':
-                entity = get_worker(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            elif entity_type == 'client':
-                entity = get_client(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            elif entity_type == 'vendor':
-                entity = get_vendor(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
             
             payment_dir = "📥 Receive" if p['payment_type'] == 'receive' else "📤 Send"
             result_lines.append(f"\n  {payment_dir} - ID: {p['id']}")
@@ -1011,7 +878,7 @@ def _list_payments_runner(query: str = "") -> str:
 def _get_payments_due_soon_runner(query: str = "") -> str:
     """Get payments due soon."""
     try:
-        from .notifications_db import get_payments_due_soon, get_worker, get_client, get_vendor
+        from .notifications_db import get_payments_due_soon
         
         days = 7
         if isinstance(query, dict):
@@ -1034,19 +901,6 @@ def _get_payments_due_soon_runner(query: str = "") -> str:
             
             # Get entity name
             entity_name = f"{entity_type} {entity_id}"
-            if entity_type == 'worker':
-                entity = get_worker(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            elif entity_type == 'client':
-                entity = get_client(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            elif entity_type == 'vendor':
-                entity = get_vendor(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            
             payment_dir = "📥 Receive from" if p['payment_type'] == 'receive' else "📤 Pay to"
             result_lines.append(f"\n  {payment_dir} {entity_name}")
             result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
@@ -1062,7 +916,7 @@ def _get_payments_due_soon_runner(query: str = "") -> str:
 def _get_overdue_payments_runner(query: str = "") -> str:
     """Get overdue payments."""
     try:
-        from .notifications_db import get_overdue_payments, get_worker, get_client, get_vendor
+        from .notifications_db import get_overdue_payments
         
         payments = get_overdue_payments()
         
@@ -1076,19 +930,6 @@ def _get_overdue_payments_runner(query: str = "") -> str:
             
             # Get entity name
             entity_name = f"{entity_type} {entity_id}"
-            if entity_type == 'worker':
-                entity = get_worker(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            elif entity_type == 'client':
-                entity = get_client(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            elif entity_type == 'vendor':
-                entity = get_vendor(entity_id)
-                if entity:
-                    entity_name = entity.get('name', entity_name)
-            
             payment_dir = "📥 Receive from" if p['payment_type'] == 'receive' else "📤 Pay to"
             result_lines.append(f"\n  {payment_dir} {entity_name}")
             result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")

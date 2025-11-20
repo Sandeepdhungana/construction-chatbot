@@ -236,6 +236,10 @@ def init_db():
             columns = [row[1] for row in cursor.fetchall()]
             if 'payment_link' not in columns:
                 cursor.execute("ALTER TABLE payments ADD COLUMN payment_link TEXT")
+            if 'client_name' not in columns:
+                cursor.execute("ALTER TABLE payments ADD COLUMN client_name TEXT")
+            if 'client_email' not in columns:
+                cursor.execute("ALTER TABLE payments ADD COLUMN client_email TEXT")
         except sqlite3.OperationalError as e:
             # Column might already exist or table doesn't exist yet
             pass
@@ -775,42 +779,13 @@ def create_payment(data: Dict) -> int:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO payments (payment_type, entity_type, entity_id, amount, currency, description, invoice_number, 
-                                due_date, status, paid_amount, paid_date, payment_method, project_name, category, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                due_date, status, paid_amount, paid_date, payment_method, project_name, category, notes, 
+                                payment_link, client_name, client_email)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data['payment_type'],
-            data['entity_type'],
-            data['entity_id'],
-            data['amount'],
-            data.get('currency', 'USD'),
-            data.get('description', ''),
-            data.get('invoice_number', ''),
-            data['due_date'],
-            data.get('status', 'pending'),
-            data.get('paid_amount', 0),
-            data.get('paid_date'),
-            data.get('payment_method', ''),
-            data.get('project_name', ''),
-            data.get('category', ''),
-            data.get('notes', '')
-        ))
-        return cursor.lastrowid
-
-
-def update_payment(payment_id: int, data: Dict) -> bool:
-    """Update a payment record."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE payments 
-            SET payment_type = ?, entity_type = ?, entity_id = ?, amount = ?, currency = ?, description = ?,
-                invoice_number = ?, due_date = ?, status = ?, paid_amount = ?, paid_date = ?, payment_method = ?,
-                project_name = ?, category = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (
-            data['payment_type'],
-            data['entity_type'],
-            data['entity_id'],
+            data.get('entity_type', 'client'),
+            data.get('entity_id', 0),
             data['amount'],
             data.get('currency', 'USD'),
             data.get('description', ''),
@@ -823,6 +798,43 @@ def update_payment(payment_id: int, data: Dict) -> bool:
             data.get('project_name', ''),
             data.get('category', ''),
             data.get('notes', ''),
+            data.get('payment_link', ''),
+            data.get('client_name', ''),
+            data.get('client_email', '')
+        ))
+        return cursor.lastrowid
+
+
+def update_payment(payment_id: int, data: Dict) -> bool:
+    """Update a payment record."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE payments 
+            SET payment_type = ?, entity_type = ?, entity_id = ?, amount = ?, currency = ?, description = ?,
+                invoice_number = ?, due_date = ?, status = ?, paid_amount = ?, paid_date = ?, payment_method = ?,
+                project_name = ?, category = ?, notes = ?, payment_link = ?, client_name = ?, client_email = ?, 
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            data['payment_type'],
+            data.get('entity_type', 'client'),
+            data.get('entity_id', 0),
+            data['amount'],
+            data.get('currency', 'USD'),
+            data.get('description', ''),
+            data.get('invoice_number', ''),
+            data['due_date'],
+            data.get('status', 'pending'),
+            data.get('paid_amount', 0),
+            data.get('paid_date'),
+            data.get('payment_method', ''),
+            data.get('project_name', ''),
+            data.get('category', ''),
+            data.get('notes', ''),
+            data.get('payment_link', ''),
+            data.get('client_name', ''),
+            data.get('client_email', ''),
             payment_id
         ))
         return cursor.rowcount > 0
