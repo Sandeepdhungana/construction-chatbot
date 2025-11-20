@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConstructionBot - AI Construction Intelligence</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-wrapper">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-content">
+                <div class="sidebar-header">
+                    <div class="logo-container">
+                        <div class="logo-icon">🏗️</div>
+                        <div class="logo-text">
+                            <h1 class="logo-title">ConstructionBot</h1>
+                            <p class="logo-subtitle">AI Intelligence</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <button class="nav-button active" data-view="chat">
+                        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                        </svg>
+                        <span class="nav-label">Chat</span>
+                    </button>
+                    
+                    <button class="nav-button" data-view="knowledge">
+                        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                        </svg>
+                        <span class="nav-label">Knowledge Base</span>
+                    </button>
+                </nav>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Chat View -->
+            <section id="chat-view" class="view active">
+                <div class="view-header">
+                    <div class="header-content">
+                        <h1 class="view-title">Chat Assistant</h1>
+                        <p class="view-description">Ask questions about your documents and data</p>
+                    </div>
+                    <button class="header-button" id="new-chat-btn">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        New Chat
+                    </button>
+                </div>
+
+                <div class="chat-container">
+                    <div id="messages" class="messages-container"></div>
+                    <div class="chat-input-container">
+                        <form id="chat-form" class="chat-form">
+                            <div class="input-wrapper">
+                                <input 
+                                    type="text" 
+                                    id="chat-input" 
+                                    placeholder="Ask anything about your documents, data, or projects..." 
+                                    autocomplete="off" 
+                                    required
+                                />
+                                <button type="submit" class="send-button" aria-label="Send message">
+                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Knowledge Base View -->
+            <section id="knowledge-view" class="view">
+                <div class="view-header">
+                    <div class="header-content">
+                        <h1 class="view-title">Knowledge Base</h1>
+                        <p class="view-description">Upload and manage your documents, spreadsheets, and files</p>
+                    </div>
+                </div>
+
+                <div class="knowledge-content">
+                    <!-- Upload Section -->
+                    <div class="upload-section">
+                        <div class="upload-card">
+                            <div class="upload-header">
+                                <div class="upload-icon-wrapper">
+                                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                                    </svg>
+                                </div>
+                                <h2 class="upload-title">Upload Files</h2>
+                                <p class="upload-subtitle">Support for PDF, DOCX, PPTX, CSV, Excel, Images, and more</p>
+                            </div>
+                            
+                            <form id="upload-form" class="upload-form">
+                                <input type="file" id="file-input" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.csv,.xls,.xlsx,.xlsm,.jpg,.jpeg,.png,.gif,.bmp,.tiff">
+                                <label for="file-input" class="file-dropzone">
+                                    <div class="dropzone-content">
+                                        <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="dropzone-icon">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                                        </svg>
+                                        <p class="dropzone-text">
+                                            <span class="dropzone-primary">Click to upload</span> or drag and drop
+                                        </p>
+                                        <p class="dropzone-secondary">PDF, DOCX, PPTX, CSV, Excel, Images</p>
+                                    </div>
+                                </label>
+                                
+                                <div id="file-list" class="file-list"></div>
+                                
+                                <button type="submit" class="upload-submit-button" id="upload-btn" disabled>
+                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                                    </svg>
+                                    Upload & Process
+                                </button>
+                                
+                                <div id="upload-status" class="upload-status"></div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Files List Section -->
+                    <div class="files-section">
+                        <div class="section-header">
+                            <h2 class="section-title">Uploaded Files</h2>
+                            <button class="refresh-button" id="refresh-files-btn">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                                Refresh
+                            </button>
+                        </div>
+                        
+                        <div id="files-list" class="files-grid">
+                            <div class="empty-state">
+                                <div class="empty-icon">📁</div>
+                                <h3 class="empty-title">No files uploaded yet</h3>
+                                <p class="empty-description">Upload files to build your knowledge base</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
