@@ -38,6 +38,20 @@
                         </svg>
                         <span class="nav-label">Knowledge Base</span>
                     </button>
+                    
+                    <button class="nav-button" data-view="notifications">
+                        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                        </svg>
+                        <span class="nav-label">Notifications</span>
+                    </button>
+                    
+                    <button class="nav-button" data-view="erp">
+                        <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        <span class="nav-label">ERP</span>
+                    </button>
                 </nav>
             </div>
         </aside>
@@ -50,7 +64,7 @@
                     <div class="header-content">
                         <h1 class="view-title">Chat Assistant</h1>
                         <p class="view-description">Ask questions about your documents and data</p>
-                    </div>
+                </div>
                     <button class="header-button" id="new-chat-btn">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -76,8 +90,8 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
                                     </svg>
                                 </button>
-                            </div>
-                        </form>
+                </div>
+            </form>
                     </div>
                 </div>
             </section>
@@ -119,6 +133,173 @@
                                 <p class="empty-description">Click "Upload Files" to add documents to your knowledge base</p>
                             </div>
                         </div>
+                    </div>
+                </div>
+        </section>
+
+            <!-- Notifications View -->
+            <section id="notifications-view" class="view">
+                <div class="view-header">
+                    <div class="header-content">
+                        <h1 class="view-title">Notifications</h1>
+                        <p class="view-description">Manage email notifications, recipients, and schedules</p>
+                    </div>
+                </div>
+
+                <div class="notifications-content">
+                    <div class="notifications-tabs">
+                        <button class="tab-button active" data-tab="smtp">SMTP Settings</button>
+                        <button class="tab-button" data-tab="recipients">Recipients</button>
+                        <button class="tab-button" data-tab="schedules">Schedules</button>
+                        <button class="tab-button" data-tab="history">History</button>
+                    </div>
+
+                    <!-- SMTP Settings Tab -->
+                    <div id="smtp-tab" class="tab-content active">
+                        <div class="section-header">
+                            <h2 class="section-title">SMTP Configurations</h2>
+                            <button class="upload-button" id="add-smtp-btn">Add SMTP Config</button>
+                        </div>
+                        <div id="smtp-list" class="config-list"></div>
+                    </div>
+
+                    <!-- Recipients Tab -->
+                    <div id="recipients-tab" class="tab-content">
+                        <div class="section-header">
+                            <h2 class="section-title">Recipients</h2>
+                            <div class="header-actions">
+                                <select id="recipient-type-filter" class="filter-select">
+                                    <option value="">All Types</option>
+                                    <option value="vendor">Vendors</option>
+                                    <option value="worker">Workers</option>
+                                    <option value="client">Clients</option>
+                                </select>
+                                <button class="upload-button" id="add-recipient-btn">Add Recipient</button>
+                            </div>
+                        </div>
+                        <div id="recipients-list" class="recipients-grid"></div>
+                    </div>
+
+                    <!-- Schedules Tab -->
+                    <div id="schedules-tab" class="tab-content">
+                        <div class="section-header">
+                            <h2 class="section-title">Notification Schedules</h2>
+                            <button class="upload-button" id="add-schedule-btn">Create Schedule</button>
+                        </div>
+                        <div id="schedules-list" class="schedules-list"></div>
+                    </div>
+
+                    <!-- History Tab -->
+                    <div id="history-tab" class="tab-content">
+                        <div class="section-header">
+                            <h2 class="section-title">Notification History</h2>
+                            <button class="refresh-button" id="refresh-history-btn">Refresh</button>
+                        </div>
+                        <div id="history-list" class="history-list"></div>
+                    </div>
+                </div>
+        </section>
+
+            <!-- ERP View -->
+            <section id="erp-view" class="view">
+                <div class="view-header">
+                    <div class="header-content">
+                        <h1 class="view-title">ERP System</h1>
+                        <p class="view-description">Manage workers, clients, vendors, and payments</p>
+                    </div>
+                    <button class="header-button" id="generate-mock-data-btn">Generate Mock Data</button>
+                </div>
+
+                <div class="erp-content">
+                    <div class="erp-tabs">
+                        <button class="tab-button active" data-tab="workers">Workers</button>
+                        <button class="tab-button" data-tab="clients">Clients</button>
+                        <button class="tab-button" data-tab="vendors">Vendors</button>
+                        <button class="tab-button" data-tab="payments">Payments</button>
+                    </div>
+
+                    <!-- Workers Tab -->
+                    <div id="workers-tab" class="tab-content active">
+                        <div class="section-header">
+                            <h2 class="section-title">Workers</h2>
+                            <div class="header-actions">
+                                <select id="worker-status-filter" class="filter-select">
+                                    <option value="">All Status</option>
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                    <option value="terminated">Terminated</option>
+                                </select>
+                                <button class="upload-button" id="add-worker-btn">Add Worker</button>
+                            </div>
+                        </div>
+                        <div id="workers-list" class="erp-grid"></div>
+                    </div>
+
+                    <!-- Clients Tab -->
+                    <div id="clients-tab" class="tab-content">
+                        <div class="section-header">
+                            <h2 class="section-title">Clients</h2>
+                            <div class="header-actions">
+                                <select id="client-status-filter" class="filter-select">
+                                    <option value="">All Status</option>
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                    <option value="completed">Completed</option>
+                                </select>
+                                <button class="upload-button" id="add-client-btn">Add Client</button>
+                            </div>
+                        </div>
+                        <div id="clients-list" class="erp-grid"></div>
+                    </div>
+
+                    <!-- Vendors Tab -->
+                    <div id="vendors-tab" class="tab-content">
+                        <div class="section-header">
+                            <h2 class="section-title">Vendors</h2>
+                            <div class="header-actions">
+                                <select id="vendor-status-filter" class="filter-select">
+                                    <option value="">All Status</option>
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                    <option value="blacklisted">Blacklisted</option>
+                                </select>
+                                <button class="upload-button" id="add-vendor-btn">Add Vendor</button>
+                            </div>
+                        </div>
+                        <div id="vendors-list" class="erp-grid"></div>
+                    </div>
+
+                    <!-- Payments Tab -->
+                    <div id="payments-tab" class="tab-content">
+                        <div class="section-header">
+                            <h2 class="section-title">Payments</h2>
+                            <div class="header-actions">
+                                <input type="text" id="payment-entity-search" class="search-input" placeholder="🔍 Search by entity name...">
+                                <select id="payment-type-filter" class="filter-select">
+                                    <option value="">All Types</option>
+                                    <option value="receive">Receive</option>
+                                    <option value="send">Send</option>
+                                </select>
+                                <select id="payment-status-filter" class="filter-select">
+                                    <option value="">All Status</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="paid">Paid</option>
+                                    <option value="overdue">Overdue</option>
+                                </select>
+                                <button class="upload-button" id="add-payment-btn">Add Payment</button>
+                            </div>
+                        </div>
+                        <div class="payment-stats">
+                            <div class="stat-card">
+                                <h3>Due Soon</h3>
+                                <p id="due-soon-count">0</p>
+                            </div>
+                            <div class="stat-card">
+                                <h3>Overdue</h3>
+                                <p id="overdue-count">0</p>
+                            </div>
+                        </div>
+                        <div id="payments-list" class="payments-table"></div>
                     </div>
                 </div>
             </section>
@@ -178,11 +359,432 @@
         </div>
     </div>
 
-    <script src="/static/script.js"></script>
-</body>
-</html>
-            </section>
-        </main>
+    <!-- SMTP Config Modal -->
+    <div id="smtp-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="smtp-modal-title">Add SMTP Configuration</h2>
+                <button class="modal-close" id="close-smtp-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="smtp-form">
+                    <input type="hidden" id="smtp-id">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="smtp-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>SMTP Host</label>
+                        <input type="text" id="smtp-host" required placeholder="smtp.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" id="smtp-port" required placeholder="587">
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="smtp-username" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="smtp-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label>From Email</label>
+                        <input type="email" id="smtp-from-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>From Name</label>
+                        <input type="text" id="smtp-from-name">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="smtp-use-tls" checked> Use TLS
+                        </label>
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipient Modal -->
+    <div id="recipient-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="recipient-modal-title">Add Recipient</h2>
+                <button class="modal-close" id="close-recipient-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="recipient-form">
+                    <input type="hidden" id="recipient-id">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="recipient-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="recipient-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Type</label>
+                        <select id="recipient-type" required>
+                            <option value="vendor">Vendor</option>
+                            <option value="worker">Worker</option>
+                            <option value="client">Client</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="text" id="recipient-phone">
+                    </div>
+                    <div class="form-group">
+                        <label>Company</label>
+                        <input type="text" id="recipient-company">
+                    </div>
+                    <div class="form-group">
+                        <label>Address</label>
+                        <textarea id="recipient-address" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea id="recipient-notes" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>SMTP Config (optional)</label>
+                        <select id="recipient-smtp-config">
+                            <option value="">Use Default</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Modal -->
+    <div id="schedule-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="schedule-modal-title">Create Schedule</h2>
+                <button class="modal-close" id="close-schedule-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="schedule-form">
+                    <input type="hidden" id="schedule-id">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="schedule-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Recipient</label>
+                        <select id="schedule-recipient" required>
+                            <option value="">Select Recipient</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Notification Type</label>
+                        <select id="schedule-type" required>
+                            <option value="payment_reminder">Payment Reminder</option>
+                            <option value="payment_request">Payment Request</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Interval (days)</label>
+                        <input type="number" id="schedule-interval" value="7" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Payment Link (optional)</label>
+                        <input type="url" id="schedule-payment-link" placeholder="https://...">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Template (optional)</label>
+                        <textarea id="schedule-template" rows="5" placeholder="Custom email template..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Trigger Condition (optional)</label>
+                        <textarea id="schedule-trigger" rows="3" placeholder="Condition description..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="schedule-enabled" checked> Enabled
+                        </label>
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+            </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Reminders Modal -->
+    <div id="reminder-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Create Payment Reminders</h2>
+                <button class="modal-close" id="close-reminder-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="reminder-payment-id">
+                <div class="form-group">
+                    <label>Payment Information</label>
+                    <p id="reminder-payment-info" style="padding: 10px; background: var(--bg-tertiary); border-radius: 6px;"></p>
+                </div>
+                <div class="form-group">
+                    <label>Days Before Due Date (comma-separated)</label>
+                    <input type="text" id="reminder-days-before" value="7,3,1" placeholder="7,3,1" required>
+                    <small style="color: var(--text-secondary);">Enter days before due date to send reminders (e.g., 7,3,1 for 7 days, 3 days, and 1 day before)</small>
+                </div>
+                <div class="form-group">
+                    <label>Custom Email Template (Optional)</label>
+                    <textarea id="reminder-email-template" rows="8" placeholder="Leave empty to use AI-generated email. Or provide a custom template with placeholders like {amount}, {due_date}, {invoice_number}, {project_name}, {description}"></textarea>
+                    <small style="color: var(--text-secondary);">You can use placeholders: {amount}, {due_date}, {invoice_number}, {project_name}, {description}, {recipient_name}</small>
+                </div>
+                <button type="button" onclick="createPaymentReminders()" class="upload-submit-button">Create Reminder Schedules</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worker Modal -->
+    <div id="worker-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="worker-modal-title">Add Worker</h2>
+                <button class="modal-close" id="close-worker-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="worker-form">
+                    <input type="hidden" id="worker-id">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="worker-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="worker-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="text" id="worker-phone">
+                    </div>
+                    <div class="form-group">
+                        <label>Role</label>
+                        <input type="text" id="worker-role" placeholder="e.g., Electrician, Plumber">
+                    </div>
+                    <div class="form-group">
+                        <label>Hourly Rate</label>
+                        <input type="number" id="worker-hourly-rate" step="0.01" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="worker-status" required>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                            <option value="terminated">Terminated</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Hire Date</label>
+                        <input type="date" id="worker-hire-date">
+                    </div>
+                    <div class="form-group">
+                        <label>Address</label>
+                        <textarea id="worker-address" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea id="worker-notes" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client Modal -->
+    <div id="client-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="client-modal-title">Add Client</h2>
+                <button class="modal-close" id="close-client-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="client-form">
+                    <input type="hidden" id="client-id">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="client-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Company Name</label>
+                        <input type="text" id="client-company-name">
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="client-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="text" id="client-phone">
+                    </div>
+                    <div class="form-group">
+                        <label>Contact Person</label>
+                        <input type="text" id="client-contact-person">
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="client-status" required>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Address</label>
+                        <textarea id="client-address" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea id="client-notes" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vendor Modal -->
+    <div id="vendor-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="vendor-modal-title">Add Vendor</h2>
+                <button class="modal-close" id="close-vendor-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="vendor-form">
+                    <input type="hidden" id="vendor-id">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="vendor-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Company Name</label>
+                        <input type="text" id="vendor-company-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="vendor-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="text" id="vendor-phone">
+                    </div>
+                    <div class="form-group">
+                        <label>Vendor Type</label>
+                        <input type="text" id="vendor-type" placeholder="e.g., Material Supplier, Equipment Rental">
+                    </div>
+                    <div class="form-group">
+                        <label>Payment Terms</label>
+                        <input type="text" id="vendor-payment-terms" placeholder="e.g., Net 30, Net 60">
+                    </div>
+                    <div class="form-group">
+                        <label>Contact Person</label>
+                        <input type="text" id="vendor-contact-person">
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="vendor-status" required>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                            <option value="blacklisted">Blacklisted</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Address</label>
+                        <textarea id="vendor-address" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea id="vendor-notes" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Modal -->
+    <div id="payment-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="payment-modal-title">Add Payment</h2>
+                <button class="modal-close" id="close-payment-modal-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="payment-form">
+                    <input type="hidden" id="payment-id">
+                    <div class="form-group">
+                        <label>Payment Type</label>
+                        <select id="payment-type" required>
+                            <option value="receive">Receive (from client)</option>
+                            <option value="send">Send (to vendor/worker)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Amount</label>
+                        <input type="number" id="payment-amount" step="0.01" min="0" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Due Date</label>
+                        <input type="date" id="payment-due-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Worker</label>
+                        <select id="payment-worker">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Client</label>
+                        <select id="payment-client">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Vendor</label>
+                        <select id="payment-vendor">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Invoice Number</label>
+                        <input type="text" id="payment-invoice-number">
+                    </div>
+                    <div class="form-group">
+                        <label>Project Name</label>
+                        <input type="text" id="payment-project-name">
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="payment-description" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="payment-status" required>
+                            <option value="pending">Pending</option>
+                            <option value="paid">Paid</option>
+                            <option value="partial">Partial</option>
+                            <option value="overdue">Overdue</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Payment Link (optional)</label>
+                        <input type="url" id="payment-link" placeholder="https://...">
+                    </div>
+                    <button type="submit" class="upload-submit-button">Save</button>
+            </form>
+            </div>
+        </div>
     </div>
 
     <script src="/static/script.js"></script>

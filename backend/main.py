@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import uuid
 import logging
+import asyncio
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Dict
 from datetime import datetime
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -18,6 +20,20 @@ from dotenv import load_dotenv
 
 from .agent import agent_orchestrator
 from .ingestion import ingest_payload, ingest_files, get_uploaded_files, delete_file
+from .notifications_db import (
+    create_smtp_config, update_smtp_config, list_smtp_configs, delete_smtp_config, get_smtp_config,
+    create_recipient, update_recipient, list_recipients, delete_recipient, get_recipient,
+    create_schedule, update_schedule, list_schedules, delete_schedule, get_schedule,
+    get_notification_history,
+    # ERP functions
+    create_worker, update_worker, get_worker, list_workers, delete_worker,
+    create_client, update_client, get_client, list_clients, delete_client,
+    create_vendor, update_vendor, get_vendor, list_vendors, delete_vendor,
+    create_payment, update_payment, get_payment, list_payments, delete_payment,
+    get_payments_due_soon, get_overdue_payments
+)
+from .notifications_service import notification_service
+from .generate_mock_data import populate_mock_data
 
 # Configure logging
 logging.basicConfig(
@@ -37,7 +53,50 @@ if not os.getenv("OPENAI_API_KEY"):
         f"Checked .env file at: {env_path.absolute()}"
     )
 
-app = FastAPI(title="ConstructionBot API", version="1.0.0")
+# Background task for checking and sending due notifications
+async def check_notifications_periodically():
+    """Background task that checks for due notifications every hour."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Wait 1 hour
+            logger.info("🔄 Running scheduled notification check...")
+            results = notification_service.check_and_send_due_notifications()
+            if results:
+                logger.info(f"✅ Sent {len(results)} notification(s)")
+                for result in results:
+                    if result.get('success'):
+                        logger.info(f"   ✓ Sent to {result.get('recipient', 'unknown')}")
+                    else:
+                        logger.error(f"   ✗ Failed: {result.get('error', 'unknown error')}")
+            else:
+                logger.info("   No notifications due at this time")
+        except Exception as e:
+            logger.error(f"❌ Error in notification check task: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown."""
+    # Startup: Start background task
+    logger.info("🚀 Starting notification scheduler background task...")
+    task = asyncio.create_task(check_notifications_periodically())
+    logger.info("✅ Notification scheduler started (checks every hour)")
+    
+    yield
+    
+    # Shutdown: Cancel background task
+    logger.info("🛑 Shutting down notification scheduler...")
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    logger.info("✅ Notification scheduler stopped")
+
+
+app = FastAPI(title="ConstructionBot API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +113,92 @@ app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+
+
+# Notification Pydantic models
+class SMTPConfigCreate(BaseModel):
+    name: str
+    host: str
+    port: int
+    username: str
+    password: str
+    use_tls: bool = True
+    from_email: str
+    from_name: Optional[str] = None
+
+
+class RecipientCreate(BaseModel):
+    name: str
+    email: str
+    type: str  # vendor, worker, client
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    address: Optional[str] = None
+    notes: Optional[str] = None
+    smtp_config_id: Optional[int] = None
+
+
+class ScheduleCreate(BaseModel):
+    name: str
+    recipient_id: int
+    notification_type: str  # payment_reminder, payment_request, custom
+    interval_days: int = 7
+    enabled: bool = True
+    trigger_condition: Optional[str] = None
+    email_template: Optional[str] = None
+    payment_link: Optional[str] = None
+
+
+class NotificationSendRequest(BaseModel):
+    schedule_id: Optional[int] = None
+    recipient_id: Optional[int] = None
+    notification_type: str
+    context: Optional[Dict] = None
+    template: Optional[str] = None
+    payment_link: Optional[str] = None
+
+
+# Notification Pydantic models
+class SMTPConfigCreate(BaseModel):
+    name: str
+    host: str
+    port: int
+    username: str
+    password: str
+    use_tls: bool = True
+    from_email: str
+    from_name: Optional[str] = None
+
+
+class RecipientCreate(BaseModel):
+    name: str
+    email: str
+    type: str  # vendor, worker, client
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    address: Optional[str] = None
+    notes: Optional[str] = None
+    smtp_config_id: Optional[int] = None
+
+
+class ScheduleCreate(BaseModel):
+    name: str
+    recipient_id: int
+    notification_type: str  # payment_reminder, payment_request, custom
+    interval_days: int = 7
+    enabled: bool = True
+    trigger_condition: Optional[str] = None
+    email_template: Optional[str] = None
+    payment_link: Optional[str] = None
+
+
+class NotificationSendRequest(BaseModel):
+    schedule_id: Optional[int] = None
+    recipient_id: Optional[int] = None
+    notification_type: str
+    context: Optional[Dict] = None
+    template: Optional[str] = None
+    payment_link: Optional[str] = None
 
 
 @app.get("/")
@@ -128,5 +273,459 @@ async def chat(request: ChatRequest) -> dict:
         elapsed = (datetime.now() - start_time).total_seconds()
         logger.error(f"❌ Chat request failed after {elapsed:.2f}s - Session: {session_id}, Error: {str(e)}")
         raise
+
+
+# ==================== NOTIFICATION API ENDPOINTS ====================
+
+# SMTP Configuration endpoints
+@app.post("/api/notifications/smtp")
+async def create_smtp_config_endpoint(config: SMTPConfigCreate) -> dict:
+    """Create a new SMTP configuration."""
+    try:
+        config_id = create_smtp_config(config.dict())
+        return {"success": True, "id": config_id, "message": "SMTP configuration created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/notifications/smtp")
+async def list_smtp_configs_endpoint() -> dict:
+    """List all SMTP configurations."""
+    configs = list_smtp_configs()
+    return {"configs": configs, "count": len(configs)}
+
+
+@app.get("/api/notifications/smtp/{config_id}")
+async def get_smtp_config_endpoint(config_id: int) -> dict:
+    """Get a specific SMTP configuration."""
+    config = get_smtp_config(config_id=config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="SMTP configuration not found")
+    # Don't return password
+    config.pop('password', None)
+    return {"config": config}
+
+
+@app.put("/api/notifications/smtp/{config_id}")
+async def update_smtp_config_endpoint(config_id: int, config: SMTPConfigCreate) -> dict:
+    """Update an SMTP configuration."""
+    success = update_smtp_config(config_id, config.dict())
+    if not success:
+        raise HTTPException(status_code=404, detail="SMTP configuration not found")
+    return {"success": True, "message": "SMTP configuration updated"}
+
+
+@app.delete("/api/notifications/smtp/{config_id}")
+async def delete_smtp_config_endpoint(config_id: int) -> dict:
+    """Delete an SMTP configuration."""
+    success = delete_smtp_config(config_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="SMTP configuration not found")
+    return {"success": True, "message": "SMTP configuration deleted"}
+
+
+# Recipient endpoints
+@app.post("/api/notifications/recipients")
+async def create_recipient_endpoint(recipient: RecipientCreate) -> dict:
+    """Create a new recipient."""
+    try:
+        recipient_id = create_recipient(recipient.dict())
+        return {"success": True, "id": recipient_id, "message": "Recipient created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/notifications/recipients")
+async def list_recipients_endpoint(type: Optional[str] = None) -> dict:
+    """List all recipients."""
+    recipients = list_recipients(recipient_type=type)
+    return {"recipients": recipients, "count": len(recipients)}
+
+
+@app.get("/api/notifications/recipients/{recipient_id}")
+async def get_recipient_endpoint(recipient_id: int) -> dict:
+    """Get a specific recipient."""
+    recipient = get_recipient(recipient_id)
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    return {"recipient": recipient}
+
+
+@app.put("/api/notifications/recipients/{recipient_id}")
+async def update_recipient_endpoint(recipient_id: int, recipient: RecipientCreate) -> dict:
+    """Update a recipient."""
+    success = update_recipient(recipient_id, recipient.dict())
+    if not success:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    return {"success": True, "message": "Recipient updated"}
+
+
+@app.delete("/api/notifications/recipients/{recipient_id}")
+async def delete_recipient_endpoint(recipient_id: int) -> dict:
+    """Delete a recipient."""
+    success = delete_recipient(recipient_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    return {"success": True, "message": "Recipient deleted"}
+
+
+# Schedule endpoints
+@app.post("/api/notifications/schedules")
+async def create_schedule_endpoint(schedule: ScheduleCreate) -> dict:
+    """Create a new notification schedule."""
+    try:
+        schedule_id = create_schedule(schedule.dict())
+        return {"success": True, "id": schedule_id, "message": "Schedule created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/notifications/schedules")
+async def list_schedules_endpoint(enabled_only: bool = False) -> dict:
+    """List all notification schedules."""
+    schedules = list_schedules(enabled_only=enabled_only)
+    return {"schedules": schedules, "count": len(schedules)}
+
+
+@app.get("/api/notifications/schedules/{schedule_id}")
+async def get_schedule_endpoint(schedule_id: int) -> dict:
+    """Get a specific schedule."""
+    schedule = get_schedule(schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return {"schedule": schedule}
+
+
+@app.put("/api/notifications/schedules/{schedule_id}")
+async def update_schedule_endpoint(schedule_id: int, schedule: ScheduleCreate) -> dict:
+    """Update a schedule."""
+    success = update_schedule(schedule_id, schedule.dict())
+    if not success:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return {"success": True, "message": "Schedule updated"}
+
+
+@app.delete("/api/notifications/schedules/{schedule_id}")
+async def delete_schedule_endpoint(schedule_id: int) -> dict:
+    """Delete a schedule."""
+    success = delete_schedule(schedule_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return {"success": True, "message": "Schedule deleted"}
+
+
+# Notification sending endpoints
+@app.post("/api/notifications/send")
+async def send_notification_endpoint(request: NotificationSendRequest) -> dict:
+    """Send a notification."""
+    try:
+        if request.schedule_id:
+            result = notification_service.send_notification(
+                schedule_id=request.schedule_id,
+                context=request.context,
+                force=True
+            )
+        elif request.recipient_id:
+            result = notification_service.send_direct_notification(
+                recipient_id=request.recipient_id,
+                notification_type=request.notification_type,
+                context=request.context,
+                template=request.template,
+                payment_link=request.payment_link
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Either schedule_id or recipient_id must be provided")
+        
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to send notification'))
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/notifications/check-and-send")
+async def check_and_send_notifications_endpoint() -> dict:
+    """Check and send due notifications. Can be called manually or runs automatically every hour."""
+    logger.info("🔔 Manual notification check triggered")
+    results = notification_service.check_and_send_due_notifications()
+    logger.info(f"📊 Check complete: {len(results)} notification(s) processed")
+    return {"results": results, "count": len(results), "message": f"Processed {len(results)} notification(s)"}
+
+
+@app.get("/api/notifications/history")
+async def get_notification_history_endpoint(limit: int = 100, recipient_id: Optional[int] = None) -> dict:
+    """Get notification history."""
+    history = get_notification_history(limit=limit, recipient_id=recipient_id)
+    return {"history": history, "count": len(history)}
+
+
+# ==================== ERP API ENDPOINTS ====================
+
+# Workers endpoints
+@app.post("/api/erp/workers")
+async def create_worker_endpoint(worker: dict) -> dict:
+    """Create a new worker."""
+    try:
+        worker_id = create_worker(worker)
+        return {"success": True, "id": worker_id, "message": "Worker created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/erp/workers")
+async def list_workers_endpoint(status: Optional[str] = None) -> dict:
+    """List all workers."""
+    workers = list_workers(status=status)
+    return {"workers": workers, "count": len(workers)}
+
+
+@app.get("/api/erp/workers/{worker_id}")
+async def get_worker_endpoint(worker_id: int) -> dict:
+    """Get a specific worker."""
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return {"worker": worker}
+
+
+@app.put("/api/erp/workers/{worker_id}")
+async def update_worker_endpoint(worker_id: int, worker: dict) -> dict:
+    """Update a worker."""
+    success = update_worker(worker_id, worker)
+    if not success:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return {"success": True, "message": "Worker updated"}
+
+
+@app.delete("/api/erp/workers/{worker_id}")
+async def delete_worker_endpoint(worker_id: int) -> dict:
+    """Delete a worker."""
+    success = delete_worker(worker_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return {"success": True, "message": "Worker deleted"}
+
+
+# Clients endpoints
+@app.post("/api/erp/clients")
+async def create_client_endpoint(client: dict) -> dict:
+    """Create a new client."""
+    try:
+        client_id = create_client(client)
+        return {"success": True, "id": client_id, "message": "Client created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/erp/clients")
+async def list_clients_endpoint(status: Optional[str] = None) -> dict:
+    """List all clients."""
+    clients = list_clients(status=status)
+    return {"clients": clients, "count": len(clients)}
+
+
+@app.get("/api/erp/clients/{client_id}")
+async def get_client_endpoint(client_id: int) -> dict:
+    """Get a specific client."""
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"client": client}
+
+
+@app.put("/api/erp/clients/{client_id}")
+async def update_client_endpoint(client_id: int, client: dict) -> dict:
+    """Update a client."""
+    success = update_client(client_id, client)
+    if not success:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"success": True, "message": "Client updated"}
+
+
+@app.delete("/api/erp/clients/{client_id}")
+async def delete_client_endpoint(client_id: int) -> dict:
+    """Delete a client."""
+    success = delete_client(client_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"success": True, "message": "Client deleted"}
+
+
+# Vendors endpoints
+@app.post("/api/erp/vendors")
+async def create_vendor_endpoint(vendor: dict) -> dict:
+    """Create a new vendor."""
+    try:
+        vendor_id = create_vendor(vendor)
+        return {"success": True, "id": vendor_id, "message": "Vendor created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/erp/vendors")
+async def list_vendors_endpoint(status: Optional[str] = None) -> dict:
+    """List all vendors."""
+    vendors = list_vendors(status=status)
+    return {"vendors": vendors, "count": len(vendors)}
+
+
+@app.get("/api/erp/vendors/{vendor_id}")
+async def get_vendor_endpoint(vendor_id: int) -> dict:
+    """Get a specific vendor."""
+    vendor = get_vendor(vendor_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"vendor": vendor}
+
+
+@app.put("/api/erp/vendors/{vendor_id}")
+async def update_vendor_endpoint(vendor_id: int, vendor: dict) -> dict:
+    """Update a vendor."""
+    success = update_vendor(vendor_id, vendor)
+    if not success:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"success": True, "message": "Vendor updated"}
+
+
+@app.delete("/api/erp/vendors/{vendor_id}")
+async def delete_vendor_endpoint(vendor_id: int) -> dict:
+    """Delete a vendor."""
+    success = delete_vendor(vendor_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"success": True, "message": "Vendor deleted"}
+
+
+# Payments endpoints
+@app.post("/api/erp/payments")
+async def create_payment_endpoint(payment: dict) -> dict:
+    """Create a new payment record."""
+    try:
+        payment_id = create_payment(payment)
+        return {"success": True, "id": payment_id, "message": "Payment created"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/erp/payments")
+async def list_payments_endpoint(
+    payment_type: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: Optional[int] = None
+) -> dict:
+    """List all payments."""
+    payments = list_payments(
+        payment_type=payment_type,
+        entity_type=entity_type,
+        status=status,
+        limit=limit
+    )
+    return {"payments": payments, "count": len(payments)}
+
+
+@app.get("/api/erp/payments/due-soon")
+async def get_payments_due_soon_endpoint(days: int = 7) -> dict:
+    """Get payments due soon."""
+    payments = get_payments_due_soon(days=days)
+    return {"payments": payments, "count": len(payments)}
+
+
+@app.get("/api/erp/payments/overdue")
+async def get_overdue_payments_endpoint() -> dict:
+    """Get overdue payments."""
+    payments = get_overdue_payments()
+    return {"payments": payments, "count": len(payments)}
+
+
+@app.get("/api/erp/payments/{payment_id}")
+async def get_payment_endpoint(payment_id: int) -> dict:
+    """Get a specific payment."""
+    payment = get_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return {"payment": payment}
+
+
+@app.put("/api/erp/payments/{payment_id}")
+async def update_payment_endpoint(payment_id: int, payment: dict) -> dict:
+    """Update a payment record."""
+    success = update_payment(payment_id, payment)
+    if not success:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return {"success": True, "message": "Payment updated"}
+
+
+@app.delete("/api/erp/payments/{payment_id}")
+async def delete_payment_endpoint(payment_id: int) -> dict:
+    """Delete a payment record."""
+    success = delete_payment(payment_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return {"success": True, "message": "Payment deleted"}
+
+
+# Mock data endpoint
+@app.post("/api/erp/generate-mock-data")
+async def generate_mock_data_endpoint() -> dict:
+    """Generate mock ERP data."""
+    try:
+        populate_mock_data()
+        return {"success": True, "message": "Mock data generated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/erp/payments/{payment_id}/reminders")
+async def get_payment_reminders_endpoint(payment_id: int) -> dict:
+    """Get existing reminder schedules for a payment."""
+    from .notifications_db import list_schedules
+    schedules = list_schedules(enabled_only=False)
+    payment_schedules = [s for s in schedules if s.get('payment_id') == payment_id and s.get('schedule_type') == 'before_due']
+    return {"schedules": payment_schedules, "count": len(payment_schedules), "exists": len(payment_schedules) > 0}
+
+
+@app.post("/api/erp/payments/{payment_id}/create-reminders")
+async def create_payment_reminders_endpoint(
+    payment_id: int, 
+    request: Dict = Body(default={})
+) -> dict:
+    """Create or update automatic reminder schedules for a payment."""
+    try:
+        from .notifications_db import list_schedules, delete_schedule
+        
+        # Check if reminders already exist for this payment
+        schedules = list_schedules(enabled_only=False)
+        existing_schedules = [s for s in schedules if s.get('payment_id') == payment_id and s.get('schedule_type') == 'before_due']
+        
+        # Delete existing reminders if updating (this ensures we update, not duplicate)
+        deleted_count = 0
+        if existing_schedules:
+            for schedule in existing_schedules:
+                delete_schedule(schedule['id'])
+                deleted_count += 1
+            logger.info(f"Deleted {deleted_count} existing reminder schedule(s) for payment {payment_id}")
+        
+        days_before = request.get('days_before', [7, 3, 1])
+        email_template = request.get('email_template')
+        
+        # Create new schedules (this replaces the old ones)
+        schedule_ids = notification_service.create_payment_based_schedules(
+            payment_id, 
+            days_before=days_before,
+            email_template=email_template
+        )
+        return {
+            "success": True, 
+            "schedule_ids": schedule_ids, 
+            "count": len(schedule_ids), 
+            "updated": deleted_count > 0,
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        import traceback
+        logger.error(f"Error creating payment reminders: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
