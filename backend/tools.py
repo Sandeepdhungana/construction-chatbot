@@ -16,7 +16,8 @@ from langchain_experimental.agents.agent_toolkits import (
 )
 # LangChain v1 imports - standardized paths
 from langchain_core.documents import Document
-from langchain_core.tools import Tool
+from langchain_core.tools import Tool, StructuredTool
+from pydantic import BaseModel, Field
 
 from .vectorstore import VectorStoreManager, vector_manager
 
@@ -291,65 +292,69 @@ def _multi_table_analysis_runner(llm):
     return _run
 
 
-def _list_tables_runner():
-    """Tool to list all available tables and their structures."""
-    def _run(query: Any = "") -> str:
-        """List all available spreadsheet tables with their structures."""
-        # Handle different input types (string or dict from agent)
-        if isinstance(query, dict):
-            # Extract the actual query string from dict format
-            query_str = query.get('__arg1', query.get('query', ''))
-        else:
-            query_str = str(query) if query else ""
-        
-        logger.info(f"📋 Listing all available tables...")
-        
-        # Check what's in the registry
-        all_categories = data_registry.categories()
-        logger.info(f"📊 Data registry categories: {all_categories}")
-        
-        tables_info = data_registry.list_all_tables()
-        logger.info(f"📊 Tables info: {tables_info}")
-        
-        if not tables_info:
-            logger.warning("⚠️  No tables found in registry, attempting to reload from file registry...")
-            # Try to reload tables from file registry
-            try:
-                from .ingestion import reload_tables_from_registry
-                reloaded = reload_tables_from_registry()
-                if reloaded > 0:
-                    logger.info(f"✅ Reloaded {reloaded} table(s) from file registry")
-                    tables_info = data_registry.list_all_tables()
-                else:
-                    summary = data_registry.summary()
-                    logger.info(f"📊 Registry summary: {summary}")
-                    return "No tables have been uploaded yet. Please upload CSV or Excel files first."
-            except Exception as e:
-                logger.error(f"❌ Error reloading tables: {e}")
+class ListTablesInput(BaseModel):
+    """Input schema for List_Available_Tables tool."""
+    query: str = Field(default="", description="Optional query string. Can be empty - tool lists all tables regardless.")
+
+def _list_tables_runner(query: str = "") -> str:
+    """List all available spreadsheet tables with their structures.
+    
+    Args:
+        query: Optional query string (can be empty). The tool works the same regardless of query.
+    """
+    # Handle different input types (string or dict from agent)
+    if isinstance(query, dict):
+        # Extract the actual query string from dict format
+        query_str = query.get('__arg1', query.get('query', ''))
+    else:
+        query_str = str(query) if query else ""
+    
+    logger.info(f"📋 Listing all available tables...")
+    
+    # Check what's in the registry
+    all_categories = data_registry.categories()
+    logger.info(f"📊 Data registry categories: {all_categories}")
+    
+    tables_info = data_registry.list_all_tables()
+    logger.info(f"📊 Tables info: {tables_info}")
+    
+    if not tables_info:
+        logger.warning("⚠️  No tables found in registry, attempting to reload from file registry...")
+        # Try to reload tables from file registry
+        try:
+            from .ingestion import reload_tables_from_registry
+            reloaded = reload_tables_from_registry()
+            if reloaded > 0:
+                logger.info(f"✅ Reloaded {reloaded} table(s) from file registry")
+                tables_info = data_registry.list_all_tables()
+            else:
                 summary = data_registry.summary()
                 logger.info(f"📊 Registry summary: {summary}")
                 return "No tables have been uploaded yet. Please upload CSV or Excel files first."
-        
-        result_lines = []
-        for category, tables in tables_info.items():
-            result_lines.append(f"\n{category.upper()} Tables:")
-            logger.info(f"📋 Category '{category}': {len(tables)} table(s)")
-            for table in tables:
-                result_lines.append(f"\n  Table: {table['name']}")
-                result_lines.append(f"    Rows: {table['rows']}, Columns: {table['columns']}")
-                result_lines.append(f"    Columns: {', '.join(table['column_names'])}")
-                if table.get('structure'):
-                    structure = table['structure']
-                    if structure.get('numeric_columns'):
-                        result_lines.append(f"    Numeric columns: {', '.join(structure['numeric_columns'])}")
-                    if structure.get('potential_keys'):
-                        result_lines.append(f"    Potential keys: {', '.join(structure['potential_keys'])}")
-        
-        result = "\n".join(result_lines)
-        logger.info(f"✅ Listed {sum(len(tables) for tables in tables_info.values())} table(s)")
-        return result
-
-    return _run
+        except Exception as e:
+            logger.error(f"❌ Error reloading tables: {e}")
+            summary = data_registry.summary()
+            logger.info(f"📊 Registry summary: {summary}")
+            return "No tables have been uploaded yet. Please upload CSV or Excel files first."
+    
+    result_lines = []
+    for category, tables in tables_info.items():
+        result_lines.append(f"\n{category.upper()} Tables:")
+        logger.info(f"📋 Category '{category}': {len(tables)} table(s)")
+        for table in tables:
+            result_lines.append(f"\n  Table: {table['name']}")
+            result_lines.append(f"    Rows: {table['rows']}, Columns: {table['columns']}")
+            result_lines.append(f"    Columns: {', '.join(table['column_names'])}")
+            if table.get('structure'):
+                structure = table['structure']
+                if structure.get('numeric_columns'):
+                    result_lines.append(f"    Numeric columns: {', '.join(structure['numeric_columns'])}")
+                if structure.get('potential_keys'):
+                    result_lines.append(f"    Potential keys: {', '.join(structure['potential_keys'])}")
+    
+    result = "\n".join(result_lines)
+    logger.info(f"✅ Listed {sum(len(tables) for tables in tables_info.values())} table(s)")
+    return result
 
 
 def _synthesis_tool_runner(llm):
@@ -388,13 +393,29 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
     general_retriever = manager.retriever()
 
     tools = [
+        # General retrieval - PUT FIRST to encourage proactive searching
+        Tool(
+            name="General_Document_Retriever",
+            func=lambda q: _format_docs(general_retriever.invoke(q)),
+            description=(
+                "PRIMARY SEARCH TOOL: Use this FIRST when you don't have concrete information to answer a question. "
+                "Searches across ALL uploaded documents (PDFs, DOCX, PPTX, CSV rows, Excel rows, images). "
+                "USE THIS PROACTIVELY - if a question might be answered in documents, search here FIRST. "
+                "This is your go-to tool for questions about project details, timelines, contracts, requirements, specifications, etc. "
+                "NEVER say 'I cannot find' without using this tool with multiple search term variations."
+            ),
+        ),
+        
         # Document retrieval tools
         Tool(
             name="PDF_Document_Retriever",
             func=lambda q: _format_docs(pdf_retriever.invoke(q)),
             description=(
-                "Use to search and retrieve relevant content from PDF documents (contracts, manuals, regulations). "
-                "Always cite the filename and page number when referencing PDF content."
+                "Use to search and retrieve relevant content from PDF documents (contracts, manuals, regulations, project plans). "
+                "Always cite the filename and page number when referencing PDF content. "
+                "USE THIS PROACTIVELY for questions about contracts, timelines, project details, compliance, regulations, specifications. "
+                "If a question might be answered in a contract or document, search it automatically. "
+                "Use this AFTER General_Document_Retriever if you need PDF-specific results."
             ),
         ),
         Tool(
@@ -402,7 +423,8 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
             func=lambda q: _format_docs(docx_retriever.invoke(q)),
             description=(
                 "Use to search and retrieve relevant content from Word documents (DOCX files). "
-                "Cite the filename when referencing DOCX content."
+                "Cite the filename when referencing DOCX content. "
+                "USE THIS PROACTIVELY for questions about project details, contracts, specifications, requirements that might be in Word documents."
             ),
         ),
         Tool(
@@ -410,7 +432,8 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
             func=lambda q: _format_docs(pptx_retriever.invoke(q)),
             description=(
                 "Use to search and retrieve relevant content from PowerPoint presentations (PPTX files). "
-                "Cite the filename when referencing PPTX content."
+                "Cite the filename when referencing PPTX content. "
+                "USE THIS PROACTIVELY for questions about project presentations, plans, or summaries."
             ),
         ),
         Tool(
@@ -431,7 +454,9 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
                 "This tool automatically understands table structures and can perform filtering (>, <, >=, <=, =, !=, contains, in/not in), "
                 "grouping, aggregations (sum, avg, count, min, max), and basic analysis. "
                 "You can specify a table name with 'table=<name>::question=<query>' or just ask a question and the tool will infer the right table(s). "
-                "This is the PRIMARY tool for structured data queries."
+                "This is the PRIMARY tool for structured data queries. "
+                "USE THIS PROACTIVELY for questions about timelines, schedules, durations, costs, budgets, quantities, resources, etc. "
+                "If a question involves numbers, dates, or calculations, search spreadsheets automatically."
             ),
         ),
         Tool(
@@ -444,13 +469,15 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
                 "The tool will automatically infer relationships and join keys when possible."
             ),
         ),
-        Tool(
+        StructuredTool.from_function(
+            func=_list_tables_runner,
             name="List_Available_Tables",
-            func=_list_tables_runner(),
             description=(
                 "Use to see what spreadsheet tables are available, their column names, row counts, and structure information. "
-                "Call this first if you're unsure what tables exist or what columns they contain."
+                "Call this first if you're unsure what tables exist or what columns they contain. "
+                "You can call this tool with an empty string or any query - it will list all tables regardless."
             ),
+            args_schema=ListTablesInput,
         ),
         
         # Row-level retrieval tools
@@ -468,16 +495,6 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
             description=(
                 "Use to retrieve specific Excel rows by semantic similarity. "
                 "Useful for finding examples or specific records. Cite sheet name and row indices."
-            ),
-        ),
-        
-        # General retrieval
-        Tool(
-            name="General_Document_Retriever",
-            func=lambda q: _format_docs(general_retriever.invoke(q)),
-            description=(
-                "Use to retrieve any document content when unsure which specific source to consult. "
-                "Searches across all uploaded documents (PDFs, DOCX, PPTX, CSV rows, Excel rows, images)."
             ),
         ),
         

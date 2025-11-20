@@ -621,31 +621,59 @@ def get_uploaded_files() -> List[Dict[str, Any]]:
     return sorted(files, key=lambda x: x.get("uploaded_at", ""), reverse=True)
 
 
-def delete_file(file_id: str) -> bool:
-    """Delete a file and remove it from registry."""
+def delete_file(file_id: str, manager: VectorStoreManager = vector_manager) -> bool:
+    """Delete a file and remove it from registry, data registry, and vectorstore."""
+    import logging
+    ingestion_logger = logging.getLogger(__name__)
+    
     registry = _load_file_registry()
     if file_id not in registry:
         return False
     
     file_path = UPLOAD_ROOT / file_id
+    metadata = registry[file_id]
+    filename = metadata.get("filename", file_path.name)
+    file_path_str = str(file_path) if file_path.exists() else None
+    
+    ingestion_logger.info(f"🗑️  Deleting file: {filename} (ID: {file_id})")
+    
+    # Delete from disk
     if file_path.exists():
         file_path.unlink()
-    
-    metadata = registry[file_id]
+        ingestion_logger.info(f"✅ Deleted file from disk: {file_path}")
     
     # Remove from data registry if it's a spreadsheet
     if metadata.get("type") in ["csv", "excel"]:
         table_name = metadata.get("table_name")
         if table_name:
             data_registry.unregister("spreadsheet", table_name)
+            ingestion_logger.info(f"✅ Removed table '{table_name}' from data registry")
         elif metadata.get("type") == "excel":
             # Remove all sheets
             for sheet_name in metadata.get("sheets", []):
                 table_name = f"{Path(file_id).stem}_{sheet_name}"
                 data_registry.unregister("spreadsheet", table_name)
+                ingestion_logger.info(f"✅ Removed table '{table_name}' from data registry")
     
+    # Delete from vectorstore by filename and path
+    deleted_count = 0
+    if file_path_str:
+        # Try deleting by path first (most specific)
+        deleted_count = manager.delete_by_metadata(path=file_path_str)
+        if deleted_count == 0:
+            # Fallback to filename if path doesn't match
+            deleted_count = manager.delete_by_metadata(filename=filename)
+    
+    if deleted_count > 0:
+        ingestion_logger.info(f"✅ Deleted {deleted_count} document(s) from vectorstore")
+    else:
+        ingestion_logger.warning(f"⚠️  No documents found in vectorstore for file: {filename}")
+    
+    # Remove from file registry
     del registry[file_id]
     _save_file_registry(registry)
+    ingestion_logger.info(f"✅ Removed file from registry")
+    
     return True
 
 

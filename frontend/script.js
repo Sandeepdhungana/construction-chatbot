@@ -17,6 +17,9 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const newChatBtn = document.getElementById("new-chat-btn");
 const fileDropzone = document.querySelector(".file-dropzone");
+const uploadModal = document.getElementById("upload-modal");
+const openUploadModalBtn = document.getElementById("open-upload-modal-btn");
+const closeUploadModalBtn = document.getElementById("close-upload-modal-btn");
 
 // Navigation
 navButtons.forEach(button => {
@@ -31,6 +34,42 @@ navButtons.forEach(button => {
         document.getElementById(`${viewName}-view`).classList.add("active");
     });
 });
+
+// Modal Handling
+openUploadModalBtn.addEventListener("click", () => {
+    uploadModal.classList.add("active");
+    document.body.style.overflow = "hidden";
+});
+
+closeUploadModalBtn.addEventListener("click", () => {
+    closeModal();
+});
+
+uploadModal.addEventListener("click", (e) => {
+    if (e.target === uploadModal) {
+        closeModal();
+    }
+});
+
+// Close modal on Escape key
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && uploadModal.classList.contains("active")) {
+        closeModal();
+    }
+});
+
+function closeModal() {
+    uploadModal.classList.remove("active");
+    document.body.style.overflow = "";
+    // Reset form if needed
+    if (selectedFiles.length === 0) {
+        selectedFiles = [];
+        fileInput.value = "";
+        updateFileList();
+        updateUploadButton();
+        uploadStatus.classList.remove("show");
+    }
+}
 
 // File Upload Handling
 fileInput.addEventListener("change", (e) => {
@@ -142,6 +181,11 @@ uploadForm.addEventListener("submit", async (event) => {
         fileInput.value = "";
         updateFileList();
         updateUploadButton();
+        
+        // Close modal after successful upload
+        setTimeout(() => {
+            closeModal();
+        }, 1500);
         
         // Refresh files list
         loadFiles();

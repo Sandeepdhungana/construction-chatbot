@@ -92,68 +92,95 @@
                 </div>
 
                 <div class="knowledge-content">
-                    <!-- Upload Section -->
-                    <div class="upload-section">
-                        <div class="upload-card">
-                            <div class="upload-header">
-                                <div class="upload-icon-wrapper">
-                                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                                    </svg>
-                                </div>
-                                <h2 class="upload-title">Upload Files</h2>
-                                <p class="upload-subtitle">Support for PDF, DOCX, PPTX, CSV, Excel, Images, and more</p>
-                            </div>
-                            
-                            <form id="upload-form" class="upload-form">
-                                <input type="file" id="file-input" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.csv,.xls,.xlsx,.xlsm,.jpg,.jpeg,.png,.gif,.bmp,.tiff">
-                                <label for="file-input" class="file-dropzone">
-                                    <div class="dropzone-content">
-                                        <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="dropzone-icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                                        </svg>
-                                        <p class="dropzone-text">
-                                            <span class="dropzone-primary">Click to upload</span> or drag and drop
-                                        </p>
-                                        <p class="dropzone-secondary">PDF, DOCX, PPTX, CSV, Excel, Images</p>
-                                    </div>
-                                </label>
-                                
-                                <div id="file-list" class="file-list"></div>
-                                
-                                <button type="submit" class="upload-submit-button" id="upload-btn" disabled>
-                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
-                                    </svg>
-                                    Upload & Process
-                                </button>
-                                
-                                <div id="upload-status" class="upload-status"></div>
-                            </form>
-                        </div>
-                    </div>
-
                     <!-- Files List Section -->
                     <div class="files-section">
                         <div class="section-header">
                             <h2 class="section-title">Uploaded Files</h2>
-                            <button class="refresh-button" id="refresh-files-btn">
-                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                Refresh
-                            </button>
+                            <div class="header-actions">
+                                <button class="upload-button" id="open-upload-modal-btn">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                    Upload Files
+                                </button>
+                                <button class="refresh-button" id="refresh-files-btn">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                    Refresh
+                                </button>
+                            </div>
                         </div>
                         
                         <div id="files-list" class="files-grid">
                             <div class="empty-state">
                                 <div class="empty-icon">📁</div>
                                 <h3 class="empty-title">No files uploaded yet</h3>
-                                <p class="empty-description">Upload files to build your knowledge base</p>
+                                <p class="empty-description">Click "Upload Files" to add documents to your knowledge base</p>
                             </div>
                         </div>
                     </div>
                 </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Upload Modal -->
+    <div id="upload-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Upload Files</h2>
+                <button class="modal-close" id="close-upload-modal-btn" aria-label="Close modal">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-card">
+                    <div class="upload-header">
+                        <div class="upload-icon-wrapper">
+                            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                        </div>
+                        <h3 class="upload-title">Upload Files</h3>
+                        <p class="upload-subtitle">Support for PDF, DOCX, PPTX, CSV, Excel, Images, and more</p>
+                    </div>
+                    
+                    <form id="upload-form" class="upload-form">
+                        <input type="file" id="file-input" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.csv,.xls,.xlsx,.xlsm,.jpg,.jpeg,.png,.gif,.bmp,.tiff">
+                        <label for="file-input" class="file-dropzone">
+                            <div class="dropzone-content">
+                                <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="dropzone-icon">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                                </svg>
+                                <p class="dropzone-text">
+                                    <span class="dropzone-primary">Click to upload</span> or drag and drop
+                                </p>
+                                <p class="dropzone-secondary">PDF, DOCX, PPTX, CSV, Excel, Images</p>
+                            </div>
+                        </label>
+                        
+                        <div id="file-list" class="file-list"></div>
+                        
+                        <button type="submit" class="upload-submit-button" id="upload-btn" disabled>
+                            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                            </svg>
+                            Upload & Process
+                        </button>
+                        
+                        <div id="upload-status" class="upload-status"></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
             </section>
         </main>
     </div>

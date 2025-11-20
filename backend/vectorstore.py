@@ -64,6 +64,57 @@ class VectorStoreManager:
             persist_directory=self.persist_directory,
         )
 
+    def delete_by_metadata(self, filename: Optional[str] = None, path: Optional[str] = None, source: Optional[str] = None) -> int:
+        """Delete documents from Chroma by metadata filters."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Build the where clause for Chroma delete
+            where_clause = {}
+            
+            if filename:
+                where_clause["filename"] = filename
+            if path:
+                where_clause["path"] = path
+            if source:
+                where_clause["source"] = source
+            
+            if not where_clause:
+                logger.warning("No metadata filters provided for deletion")
+                return 0
+            
+            logger.info(f"🔍 Searching for documents to delete with filters: {where_clause}")
+            
+            # Access the underlying Chroma collection
+            collection = self.vectorstore._collection
+            
+            # Query to get matching IDs
+            # Chroma's get method returns a dict with 'ids', 'metadatas', 'documents', etc.
+            results = collection.get(
+                where=where_clause,
+                include=["metadatas", "documents"]
+            )
+            
+            if results and results.get("ids") and len(results["ids"]) > 0:
+                ids_to_delete = results["ids"]
+                logger.info(f"🗑️  Found {len(ids_to_delete)} document(s) to delete from vectorstore")
+                
+                # Delete by IDs using the collection's delete method
+                collection.delete(ids=ids_to_delete)
+                self.vectorstore.persist()
+                logger.info(f"✅ Successfully deleted {len(ids_to_delete)} document(s) from vectorstore")
+                return len(ids_to_delete)
+            else:
+                logger.info("No documents found matching the filters")
+                return 0
+                
+        except Exception as e:
+            logger.error(f"❌ Error deleting documents from vectorstore: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return 0
+
     def retriever(self, k: int = 6, source: Optional[str] = None):
         """Return a retriever optionally filtered by metadata source."""
         search_kwargs = {"k": k}
