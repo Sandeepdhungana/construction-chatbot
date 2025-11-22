@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import uuid
 
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Chroma
@@ -16,6 +19,8 @@ load_dotenv(dotenv_path=env_path)
 
 # LangChain v1 import
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStoreManager:
@@ -37,22 +42,74 @@ class VectorStoreManager:
         )
 
     def add_documents(self, documents: Iterable[Document]) -> int:
-        """Add a batch of LangChain Documents to the store."""
+        """Add a batch of LangChain Documents to the store with parallel threading for faster embedding."""
         docs = list(documents)
         if not docs:
             return 0
         
-        # ChromaDB has a max batch size limit, so we need to chunk the documents
-        # Using a conservative batch size to avoid errors
-        batch_size = 4000
+        logger.info(f"📥 Adding {len(docs)} documents to vectorstore...")
+        
+        # Use ThreadPoolExecutor to speed up embedding (I/O bound operation)
+        # Split documents into batches for parallel processing
+        num_workers = min(8, len(docs) // 50 + 1)  # Limit to 8 workers max to avoid API rate limits
+        batch_size = max(50, len(docs) // num_workers)  # At least 50 docs per batch
+        
+        logger.info(f"⚡ Using {num_workers} threads for parallel embedding (batch size: {batch_size})")
+        
+        # Process documents in parallel batches
+        batches = [docs[i:i + batch_size] for i in range(0, len(docs), batch_size)]
+        
+        # Embed documents in parallel using threads
+        all_embeddings = []
+        all_metadatas = []
+        all_doc_texts = []
+        all_ids = []
+        
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all batches
+            future_to_batch = {executor.submit(_embed_documents_batch, batch): batch for batch in batches}
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_batch):
+                try:
+                    embeddings, metadatas, doc_texts, ids = future.result()
+                    all_embeddings.extend(embeddings)
+                    all_metadatas.extend(metadatas)
+                    all_doc_texts.extend(doc_texts)
+                    all_ids.extend(ids)
+                except Exception as e:
+                    batch = future_to_batch[future]
+                    logger.error(f"❌ Error embedding batch of {len(batch)} documents: {e}")
+        
+        if not all_embeddings:
+            logger.error("❌ No documents were successfully embedded")
+            return 0
+        
+        logger.info(f"✅ Embedded {len(all_embeddings)} documents, adding to ChromaDB...")
+        
+        # Add to ChromaDB using collection.add with pre-computed embeddings
+        collection = self.vectorstore._collection
+        
+        # ChromaDB has a max batch size limit, so we need to chunk
+        chroma_batch_size = 4000
         total_added = 0
         
-        for i in range(0, len(docs), batch_size):
-            batch = docs[i:i + batch_size]
-            self.vectorstore.add_documents(batch)
-            total_added += len(batch)
+        for i in range(0, len(all_ids), chroma_batch_size):
+            batch_ids = all_ids[i:i + chroma_batch_size]
+            batch_embeddings = all_embeddings[i:i + chroma_batch_size]
+            batch_metadatas = all_metadatas[i:i + chroma_batch_size]
+            batch_documents = all_doc_texts[i:i + chroma_batch_size]
+            
+            collection.add(
+                ids=batch_ids,
+                embeddings=batch_embeddings,
+                metadatas=batch_metadatas,
+                documents=batch_documents
+            )
+            total_added += len(batch_ids)
         
         self.vectorstore.persist()
+        logger.info(f"✅ Successfully added {total_added} documents to vectorstore")
         return total_added
 
     def clear(self) -> None:
@@ -121,6 +178,35 @@ class VectorStoreManager:
         if source:
             search_kwargs["filter"] = {"source": source}
         return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
+
+
+def _embed_documents_batch(docs_batch: List[Document]) -> tuple:
+    """Helper function to embed a batch of documents in a worker thread.
+    
+    Returns:
+        tuple: (embeddings, metadatas, documents, ids)
+    """
+    # Initialize embeddings (thread-safe)
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    
+    # Extract text content and metadata
+    texts = [doc.page_content for doc in docs_batch]
+    metadatas = [doc.metadata for doc in docs_batch]
+    
+    # Generate embeddings
+    try:
+        embedded_vectors = embeddings.embed_documents(texts)
+        
+        # Generate unique IDs for each document
+        ids = [str(uuid.uuid4()) for _ in docs_batch]
+        
+        return (embedded_vectors, metadatas, texts, ids)
+    except Exception as e:
+        logger.error(f"❌ Error embedding batch: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Return empty results on error
+        return ([], [], [], [])
 
 
 vector_manager = VectorStoreManager()

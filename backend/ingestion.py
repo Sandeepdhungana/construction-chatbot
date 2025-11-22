@@ -296,7 +296,7 @@ def _load_excel_file(path: Path) -> Dict[str, pd.DataFrame]:
 
 
 def _csv_documents(path: Path, source_label: str) -> Tuple[List[Document], pd.DataFrame, Dict[str, Any]]:
-    """Load CSV and create documents with structure analysis."""
+    """Load CSV and return empty documents list (structured data is handled via data_registry, not embeddings)."""
     try:
         df = pd.read_csv(path)
     except Exception as e:
@@ -305,46 +305,16 @@ def _csv_documents(path: Path, source_label: str) -> Tuple[List[Document], pd.Da
     
     structure = _analyze_dataframe_structure(df) if not df.empty else {}
     
+    # Don't create documents for structured data - it's queried directly via data_registry
+    # Only return empty list since CSV data doesn't need embedding
     docs: List[Document] = []
-    for idx, row in df.iterrows():
-        content_lines = [f"{col}: {row[col]}" for col in df.columns]
-        docs.append(
-            Document(
-                page_content="\n".join(content_lines),
-                metadata={
-                    "source": source_label,
-                    "filename": path.name,
-                    "row_index": int(idx),
-                    "table_name": path.stem,
-                },
-            )
-        )
-    
-    # Add a document describing the table structure
-    structure_doc = Document(
-        page_content=(
-            f"Table structure for {path.name}:\n"
-            f"Columns: {', '.join(df.columns.tolist())}\n"
-            f"Row count: {len(df)}\n"
-            f"Numeric columns: {', '.join(structure.get('numeric_columns', []))}\n"
-            f"Text columns: {', '.join(structure.get('text_columns', []))}\n"
-            f"Potential keys: {', '.join(structure.get('potential_keys', []))}\n"
-        ),
-        metadata={
-            "source": f"{source_label}_structure",
-            "filename": path.name,
-            "table_name": path.stem,
-        },
-    )
-    docs.append(structure_doc)
     
     return docs, df, structure
 
 
 def _excel_documents(path: Path, source_label: str) -> Tuple[List[Document], Dict[str, pd.DataFrame], Dict[str, Dict[str, Any]]]:
-    """Load Excel file and create documents for all sheets."""
+    """Load Excel file and return empty documents list (structured data is handled via data_registry, not embeddings)."""
     sheets = _load_excel_file(path)
-    all_docs: List[Document] = []
     structures: Dict[str, Dict[str, Any]] = {}
     
     for sheet_name, df in sheets.items():
@@ -353,41 +323,10 @@ def _excel_documents(path: Path, source_label: str) -> Tuple[List[Document], Dic
         
         structure = _analyze_dataframe_structure(df)
         structures[sheet_name] = structure
-        
-        # Create row documents
-        for idx, row in df.iterrows():
-            content_lines = [f"{col}: {row[col]}" for col in df.columns]
-            all_docs.append(
-                Document(
-                    page_content="\n".join(content_lines),
-                    metadata={
-                        "source": source_label,
-                        "filename": path.name,
-                        "sheet_name": sheet_name,
-                        "row_index": int(idx),
-                        "table_name": f"{path.stem}_{sheet_name}",
-                    },
-                )
-            )
-        
-        # Add structure document
-        structure_doc = Document(
-            page_content=(
-                f"Table structure for {path.name} (sheet: {sheet_name}):\n"
-                f"Columns: {', '.join(df.columns.tolist())}\n"
-                f"Row count: {len(df)}\n"
-                f"Numeric columns: {', '.join(structure.get('numeric_columns', []))}\n"
-                f"Text columns: {', '.join(structure.get('text_columns', []))}\n"
-                f"Potential keys: {', '.join(structure.get('potential_keys', []))}\n"
-            ),
-            metadata={
-                "source": f"{source_label}_structure",
-                "filename": path.name,
-                "sheet_name": sheet_name,
-                "table_name": f"{path.stem}_{sheet_name}",
-            },
-        )
-        all_docs.append(structure_doc)
+    
+    # Don't create documents for structured data - it's queried directly via data_registry
+    # Only return empty list since Excel data doesn't need embedding
+    all_docs: List[Document] = []
     
     return all_docs, sheets, structures
 
@@ -582,7 +521,7 @@ def reload_tables_from_registry() -> int:
         if file_type == "csv":
             try:
                 ingestion_logger.info(f"📄 Reloading CSV: {file_path.name}")
-                docs, df, structure = _csv_documents(file_path, "csv")
+                _, df, structure = _csv_documents(file_path, "csv")  # Ignore docs, we don't embed CSV
                 table_name = metadata.get("table_name") or file_path.stem
                 _register_dataframe("spreadsheet", table_name, df, structure)
                 reloaded_count += 1
@@ -593,7 +532,7 @@ def reload_tables_from_registry() -> int:
         elif file_type == "excel":
             try:
                 ingestion_logger.info(f"📄 Reloading Excel: {file_path.name}")
-                docs, sheets, structures = _excel_documents(file_path, "excel")
+                _, sheets, structures = _excel_documents(file_path, "excel")  # Ignore docs, we don't embed Excel
                 for sheet_name, df in sheets.items():
                     table_name = f"{file_path.stem}_{sheet_name}"
                     structure = structures.get(sheet_name, {})
