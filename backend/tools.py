@@ -194,16 +194,81 @@ def _format_docs(docs: Iterable[Document]) -> str:
     return "\n\n".join(rendered)
 
 
-def _build_pandas_agent(llm, df: pd.DataFrame) -> Any:
-    """Build a pandas dataframe agent (returns a runnable/graph in LangChain v1)."""
+def _build_pandas_agent(llm, df: pd.DataFrame, table_name: Optional[str] = None) -> Any:
+    """Build a pandas dataframe agent (returns a runnable/graph in LangChain v1).
+    
+    IMPORTANT: Only pass a SINGLE table DataFrame - never pass merged/concatenated DataFrames.
+    """
+    # Ensure we're working with a clean copy to avoid any accidental modifications
+    df_clean = df.copy()
+    
+    # Validate that DataFrame doesn't look like it was merged (check for excessive NaN columns)
+    nan_ratio = df_clean.isna().sum().sum() / (len(df_clean) * len(df_clean.columns))
+    if nan_ratio > 0.5:
+        logger.warning(f"⚠️  DataFrame has high NaN ratio ({nan_ratio:.2%}) - may be incorrectly merged")
+    
+    if table_name:
+        logger.info(f"🔧 Building pandas agent for table '{table_name}' with {len(df_clean)} rows, {len(df_clean.columns)} columns")
+    
+    # CRITICAL: Pass as a SINGLE DataFrame (not a list) to ensure agent only works with this ONE table
+    # Passing a list would give the agent access to multiple DataFrames and enable merging/joining
+    
+    # Custom prefix to ensure agent shows actual data values
+    prefix = """You are working with a pandas DataFrame. When answering questions:
+1. ALWAYS execute pandas code to retrieve the actual data values
+2. NEVER say "not shown in the observation" or "can be found in the dataframe" - SHOW THE ACTUAL VALUES
+3. For each field requested, display the actual value from the DataFrame
+4. Use df.loc, df.iloc, or df[df['column'] == value] to retrieve specific rows
+5. Print or display the actual DataFrame values, not placeholders
+6. Format your answer clearly showing all requested information with actual values
+7. Example: If asked about Worker_ID 12, show: Worker_ID: 12, Name: John Doe, Trade: Electrician, etc.
+8. DO NOT use placeholders - always show the real data from the DataFrame"""
+    
     return create_pandas_dataframe_agent(
         llm,
-        df,
-
+        df_clean,  # Single DataFrame - agent will only work with this table
         allow_dangerous_code=True,  # Required for pandas agent to execute code
         handle_parsing_errors=True,
         verbose=False,
+        prefix=prefix,  # Custom prefix to force showing actual values
     )
+
+
+def _clean_pandas_output(output: str) -> str:
+    """Clean pandas output to remove NaN-heavy results and improve readability."""
+    if not output:
+        return output
+    
+    # Check if output contains mostly NaN values
+    lines = output.split('\n')
+    cleaned_lines = []
+    skip_next_nan_row = False
+    
+    for i, line in enumerate(lines):
+        # Skip rows that are mostly NaN (e.g., "1026        NaN  NaN   NaN  ...")
+        if 'NaN' in line and line.count('NaN') > 3:
+            # Check if this is a data row (not a header)
+            if not any(keyword in line.lower() for keyword in ['worker_id', 'name', 'trade', 'columns', 'rows', 'index']):
+                logger.warning(f"⚠️  Skipping NaN-heavy row: {line[:100]}")
+                skip_next_nan_row = True
+                continue
+        
+        # Skip empty DataFrames or results with only NaN
+        if '[1 rows x' in line and 'columns]' in line and i > 0:
+            # Check previous line for NaN content
+            if i > 0 and 'NaN' in lines[i-1]:
+                logger.warning(f"⚠️  Skipping empty/NaN DataFrame result")
+                continue
+        
+        cleaned_lines.append(line)
+    
+    cleaned_output = '\n'.join(cleaned_lines)
+    
+    # If cleaned output is significantly shorter, it likely had NaN issues
+    if len(cleaned_output) < len(output) * 0.5:
+        logger.warning("⚠️  Output was heavily cleaned due to NaN values")
+    
+    return cleaned_output
 
 
 
@@ -252,75 +317,187 @@ def _generic_spreadsheet_runner(llm, registry: DataRegistry, uid: Optional[int] 
                 logger.error(f"❌ Failed to load table '{table_name}' - DataFrame is None")
                 return f"Error: Could not load table '{table_name}'. The table may not be properly registered. Please try uploading the file again."
             logger.info(f"✅ Loaded table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
-            agent = _build_pandas_agent(llm, df)
+            agent = _build_pandas_agent(llm, df, table_name=table_name)
         else:
-            # Try to infer which table to use based on the query
-            # Look for column names or keywords that might indicate which table
+            # CRITICAL: Search ALL relevant tables individually, not merged
+            # This ensures comprehensive answers when data spans multiple tables
             question_lower = question.lower()
-            inferred_table = None
+            relevant_tables = []
             
-            # Check each table's columns to see if they match the query
+            # Find all tables that might be relevant to the query
             for table_info in tables:
                 table_name_check = table_info["name"].lower()
-                # Use "column_names" which is a list, not "columns" which is an integer count
                 column_names = table_info.get("column_names", [])
                 columns = [col.lower() for col in column_names] if column_names else []
                 
-                # Check if query mentions table name or key columns
-                if (table_name_check in question_lower or 
-                    any(col in question_lower for col in columns if col and len(col) > 3)):
-                    inferred_table = table_info["name"]
-                    logger.info(f"🎯 Inferred table '{inferred_table}' based on query")
-                    break
+                # Check if query mentions table name or any columns
+                is_relevant = (
+                    table_name_check in question_lower or 
+                    any(col in question_lower for col in columns if col and len(col) > 3) or
+                    # If query is general (no specific table mentioned), include all tables
+                    len(tables) <= 3  # If 3 or fewer tables, search all
+                )
+                
+                if is_relevant:
+                    relevant_tables.append(table_info["name"])
+                    logger.info(f"🎯 Table '{table_info['name']}' identified as potentially relevant")
             
-            if inferred_table:
-                df = registry.get("spreadsheet", inferred_table, user_id=uid)
-                if df is not None and not df.empty:
-                    logger.info(f"✅ Using inferred table '{inferred_table}' with {len(df)} rows, {len(df.columns)} columns")
-                    agent = _build_pandas_agent(llm, df)
+            # If no tables matched, search all tables (comprehensive search)
+            if not relevant_tables:
+                logger.info("📋 No specific tables matched, searching ALL tables for comprehensive results")
+                relevant_tables = [t["name"] for t in tables]
+            
+            # If only one relevant table, use it directly
+            if len(relevant_tables) == 1:
+                table_name = relevant_tables[0]
+                df = registry.get("spreadsheet", table_name, user_id=uid)
+                if df is None or df.empty:
+                    logger.error(f"❌ Failed to load table '{table_name}'")
+                    return f"Error: Could not load table '{table_name}'. Please try uploading the file again."
+                logger.info(f"✅ Using table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
+                agent = _build_pandas_agent(llm, df, table_name=table_name)
+            else:
+                # Multiple relevant tables - search each one INDIVIDUALLY and return separate results
+                logger.info(f"🔍 Searching {len(relevant_tables)} relevant table(s) individually: {relevant_tables}")
+                all_results = []
+                
+                for table_name in relevant_tables:
+                    try:
+                        df = registry.get("spreadsheet", table_name, user_id=uid)
+                        if df is None or df.empty:
+                            logger.warning(f"⚠️  Skipping empty table '{table_name}'")
+                            continue
+                        
+                        logger.info(f"📊 Querying table '{table_name}' individually ({len(df)} rows)...")
+                        # Log DataFrame info to debug
+                        logger.info(f"📋 DataFrame columns: {list(df.columns)}")
+                        logger.info(f"📋 DataFrame shape: {df.shape}")
+                        
+                        table_agent = _build_pandas_agent(llm, df, table_name=table_name)
+                        
+                        # Enhance question to prevent NaN results and merging, and ensure actual data is shown
+                        enhanced_question = (
+                            f"{question}\n\n"
+                            "CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n"
+                            "1. Work ONLY with the current DataFrame - do NOT merge, join, or concatenate with other tables\n"
+                            "2. You MUST execute pandas code to retrieve and DISPLAY the actual data values\n"
+                            "3. NEVER say 'not shown in the observation' or 'can be found in the dataframe' - SHOW THE ACTUAL VALUES\n"
+                            "4. For each field requested, display the actual value from the DataFrame\n"
+                            "5. Use df.loc or df[df['column'] == value] to retrieve specific rows and SHOW all column values\n"
+                            "6. Filter out rows with all NaN values before returning results\n"
+                            "7. If a query would result in mostly NaN values, return 'No matching data found' instead\n"
+                            "8. Provide a clear answer with ACTUAL DATA VALUES, formatted clearly\n"
+                            "9. Example format: 'Worker_ID: 12, Name: John Doe, Trade: Electrician, Daily_Wage: 150.00, ...'\n"
+                            "10. DO NOT use placeholders or say data exists without showing it - SHOW THE ACTUAL VALUES"
+                        )
+                        
+                        # Query this specific table individually
+                        # Pandas agent expects {"input": ...} format, not {"messages": ...}
+                        try:
+                            result = table_agent.invoke({"input": enhanced_question})
+                            # Handle different response formats
+                            if isinstance(result, dict):
+                                # Try to get output from various possible keys
+                                output = result.get("output", "")
+                                if not output and "messages" in result:
+                                    messages = result["messages"]
+                                    if messages:
+                                        last_msg = messages[-1]
+                                        output = getattr(last_msg, "content", str(last_msg))
+                                if not output:
+                                    output = str(result)
+                            else:
+                                output = str(result)
+                            
+                            # Clean output to remove NaN-heavy results
+                            output = _clean_pandas_output(output)
+                            if output and output.strip() and "nan" not in output.lower()[:200]:
+                                # Return results from each table separately, not merged
+                                all_results.append(f"=== Results from table '{table_name}' ===\n{output}\n")
+                                logger.info(f"✅ Found results in table '{table_name}'")
+                            else:
+                                logger.warning(f"⚠️  Skipping NaN-heavy output from table '{table_name}'")
+                        except Exception as e:
+                            logger.warning(f"⚠️  Error querying table '{table_name}': {e}")
+                            # Try fallback with simpler question
+                            try:
+                                result = table_agent.invoke({"input": question})
+                                output = result.get("output", "") if isinstance(result, dict) else str(result)
+                                output = _clean_pandas_output(output)
+                                if output and output.strip() and "nan" not in output.lower()[:200]:
+                                    all_results.append(f"=== Results from table '{table_name}' ===\n{output}\n")
+                                else:
+                                    logger.warning(f"⚠️  Skipping NaN-heavy fallback output from table '{table_name}'")
+                            except Exception as e2:
+                                logger.error(f"❌ Fallback also failed for table '{table_name}': {e2}")
+                                pass
+                    except Exception as e:
+                        logger.error(f"❌ Error processing table '{table_name}': {e}")
+                        continue
+                
+                if all_results:
+                    # Return results from each table separately, clearly labeled
+                    combined_result = "\n".join(all_results)
+                    logger.info(f"✅ Returned results from {len(all_results)} table(s) individually")
+                    return combined_result
                 else:
-                    # Fallback: use first table if inference failed
+                    # Fallback: use first table if all searches failed
                     if tables:
                         first_table = tables[0]["name"]
                         df = registry.get("spreadsheet", first_table, user_id=uid)
                         if df is None or df.empty:
-                            logger.error(f"❌ Failed to load table '{first_table}'")
-                            return f"Error: Could not load table '{first_table}'. Please try uploading the file again."
-                        logger.info(f"⚠️  Inference failed, using first available table '{first_table}'")
-                        agent = _build_pandas_agent(llm, df)
+                            return f"Error: Could not load any tables. Please try uploading the files again."
+                        logger.info(f"⚠️  All multi-table searches failed, using first table '{first_table}'")
+                        agent = _build_pandas_agent(llm, df, table_name=first_table)
                     else:
                         return "No spreadsheet data available."
-            else:
-                # No inference possible, use first table (don't combine all tables)
-                if tables:
-                    first_table = tables[0]["name"]
-                    df = registry.get("spreadsheet", first_table, user_id=uid)
-                    if df is None or df.empty:
-                        logger.error(f"❌ Failed to load table '{first_table}'")
-                        return f"Error: Could not load table '{first_table}'. Please try uploading the file again."
-                    logger.info(f"⚠️  No table inferred, using first available table '{first_table}'. "
-                              f"For multi-table queries, use Multi_Table_Analysis_Tool or specify table name.")
-                    agent = _build_pandas_agent(llm, df)
-                else:
-                    return "No spreadsheet data available."
 
         
         # Execute query - let the agent decide how to search based on the question
         logger.info(f"🔍 Executing pandas query: {question[:200]}...")
+        # Enhance question to prevent NaN results and merging, and ensure actual data is shown
+        enhanced_question = (
+            f"{question}\n\n"
+            "CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n"
+            "1. Work ONLY with the current DataFrame - do NOT merge, join, or concatenate with other tables\n"
+            "2. You MUST execute pandas code to retrieve and DISPLAY the actual data values\n"
+            "3. NEVER say 'not shown in the observation' or 'can be found in the dataframe' - SHOW THE ACTUAL VALUES\n"
+            "4. For each field requested, display the actual value from the DataFrame\n"
+            "5. Use df.loc or df[df['column'] == value] to retrieve specific rows and SHOW all column values\n"
+            "6. Filter out rows with all NaN values before returning results\n"
+            "7. If a query would result in mostly NaN values, return 'No matching data found' instead\n"
+            "8. Provide a clear answer with ACTUAL DATA VALUES, formatted clearly\n"
+            "9. Example format: 'Worker_ID: 12, Name: John Doe, Trade: Electrician, Daily_Wage: 150.00, ...'\n"
+            "10. DO NOT use placeholders or say data exists without showing it - SHOW THE ACTUAL VALUES"
+        )
+        # Pandas agent expects {"input": ...} format, not {"messages": ...}
         try:
-            result = agent.invoke({"messages": [{"role": "user", "content": question}]})
-            if isinstance(result, dict) and "messages" in result:
-                messages = result["messages"]
-                if messages:
-                    last_msg = messages[-1]
-                    output = getattr(last_msg, "content", str(last_msg))
-                    logger.info(f"✅ Query completed. Output length: {len(output)} chars")
-                    return output
+            result = agent.invoke({"input": enhanced_question})
+            # Handle different response formats
+            if isinstance(result, dict):
+                output = result.get("output", "")
+                if not output and "messages" in result:
+                    messages = result["messages"]
+                    if messages:
+                        last_msg = messages[-1]
+                        output = getattr(last_msg, "content", str(last_msg))
+                if not output:
+                    output = str(result)
+            else:
+                output = str(result)
+            
+            # Clean output to remove NaN-heavy results
+            output = _clean_pandas_output(output)
+            logger.info(f"✅ Query completed. Output length: {len(output)} chars")
+            return output
         except Exception as e:
-            logger.warning(f"⚠️  First invocation method failed: {e}, trying fallback")
+            logger.warning(f"⚠️  Query execution failed: {e}, trying fallback")
             try:
+                # Try with simpler question
                 result = agent.invoke({"input": question})
-                output = result.get("output", "No output produced.")
+                output = result.get("output", "No output produced.") if isinstance(result, dict) else str(result)
+                # Clean output to remove NaN-heavy results
+                output = _clean_pandas_output(output)
                 logger.info(f"✅ Query completed (fallback). Output length: {len(output)} chars")
                 return output
             except Exception as e2:
@@ -391,7 +568,7 @@ def _multi_table_analysis_runner(llm, registry: DataRegistry, uid: Optional[int]
                 combined_dfs.append(df_copy)
             df = pd.concat(combined_dfs, ignore_index=True)
         
-        agent = _build_pandas_agent(llm, df)
+        agent = _build_pandas_agent(llm, df, table_name=None)
 
         
         try:
@@ -582,17 +759,18 @@ def build_tools(llm, manager: VectorStoreManager, data_registry: Optional[DataRe
             description=(
                 "MANDATORY FOR CSV/EXCEL QUERIES: Use to query ANY uploaded spreadsheet table (CSV or Excel) using natural language. "
                 "ALWAYS call List_Available_Tables FIRST to see what tables and columns exist. "
-                "CRITICAL: If multiple CSV/Excel files exist, you MUST search MULTIPLE tables, not just one. "
+                "CRITICAL MULTI-TABLE SEARCH: This tool AUTOMATICALLY searches ALL relevant tables when you ask a question without specifying a table name. "
+                "It will identify which tables are relevant based on column names and table names, then search ALL of them and combine results. "
+                "This ensures comprehensive answers when data spans multiple CSV/Excel files. "
                 "This tool automatically understands table structures, finds relevant columns, and can perform filtering (>, <, >=, <=, =, !=, contains, in/not in), "
                 "grouping, aggregations (sum, avg, count, min, max), and basic analysis. "
-                "You can specify a table name with 'table=<name>::question=<query>' or just ask a question and the tool will infer the right table(s) and columns. "
-                "IMPORTANT: When multiple tables exist, call this tool MULTIPLE times - once for each relevant table. "
-                "For example, if you have 'workers.csv' and 'payments.csv', search BOTH when asked about worker payments. "
+                "You can specify a specific table with 'table=<name>::question=<query>' if you want to target one table, "
+                "but by default it searches ALL relevant tables automatically and combines results. "
+                "For complex queries spanning multiple tables that need joins or complex relationships, use Multi_Table_Analysis_Tool. "
                 "This is the PRIMARY tool for structured data queries. "
                 "USE THIS PROACTIVELY for questions about timelines, schedules, durations, costs, budgets, quantities, resources, etc. "
-                "If a question involves numbers, dates, or calculations, search spreadsheets automatically across ALL relevant tables. "
+                "If a question involves numbers, dates, or calculations, search spreadsheets automatically - the tool will search ALL relevant tables. "
                 "ALWAYS use this tool when CSV/Excel data exists - don't skip spreadsheet searches. "
-                "After searching one table, check if other tables might have relevant information and search those too. "
                 "Use together with Multi_Table_Analysis_Tool for cross-table queries, and with ERP tools and document retrievers for comprehensive answers."
             ),
         ),
