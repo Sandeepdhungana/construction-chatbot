@@ -132,22 +132,29 @@ class VectorStoreManager:
         
         try:
             # Build the where clause for Chroma delete
-            where_clause = {}
+            # ChromaDB requires $and operator when multiple conditions are present
+            conditions = []
             
             # Always filter by user_id if provided
             if user_id is not None:
-                where_clause["user_id"] = user_id
+                conditions.append({"user_id": user_id})
             
             if filename:
-                where_clause["filename"] = filename
+                conditions.append({"filename": filename})
             if path:
-                where_clause["path"] = path
+                conditions.append({"path": path})
             if source:
-                where_clause["source"] = source
+                conditions.append({"source": source})
             
-            if not where_clause:
+            if not conditions:
                 logger.warning("No metadata filters provided for deletion")
                 return 0
+            
+            # Build proper ChromaDB filter format
+            if len(conditions) == 1:
+                where_clause = conditions[0]
+            else:
+                where_clause = {"$and": conditions}
             
             logger.info(f"🔍 Searching for documents to delete with filters: {where_clause}")
             
@@ -184,9 +191,11 @@ class VectorStoreManager:
         """Return a retriever optionally filtered by metadata source and user_id."""
         search_kwargs = {"k": k}
         # Always filter by user_id to ensure data isolation
-        filter_dict = {"user_id": self.user_id}
+        # ChromaDB requires $and operator when multiple conditions are present
         if source:
-            filter_dict["source"] = source
+            filter_dict = {"$and": [{"user_id": self.user_id}, {"source": source}]}
+        else:
+            filter_dict = {"user_id": self.user_id}
         search_kwargs["filter"] = filter_dict
         return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
 
