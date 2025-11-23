@@ -55,19 +55,36 @@ if not os.getenv("OPENAI_API_KEY"):
     )
 
 # Background task for checking and sending due notifications
-# NOTE: Disabled for multi-user support - users should manually trigger notifications
-# or we can implement per-user background tasks later
 async def check_notifications_periodically():
-    """Background task that checks for due notifications every hour."""
-    # TODO: Implement per-user notification checking or disable background task
-    # For now, users can manually trigger notifications via the API endpoint
-    logger.info("⚠️  Background notification checking is disabled for multi-user support")
-    logger.info("   Users can manually trigger notifications via /api/notifications/check-and-send")
+    """Background task that checks for due notifications every hour for all users."""
+    logger.info("✅ Background notification checking enabled for multi-user support")
     while True:
         try:
             await asyncio.sleep(3600)  # Wait 1 hour
-            # Background task disabled - users must manually trigger notifications
-            pass
+            logger.info("🔄 Running scheduled notification check for all users...")
+            
+            # Get all users
+            from .auth import get_all_users
+            users = get_all_users()
+            logger.info(f"📊 Found {len(users)} user(s) to check notifications for")
+            
+            # Check notifications for each user
+            for user in users:
+                user_id = user["id"]
+                user_email = user.get("email", "unknown")
+                try:
+                    logger.info(f"🔍 Checking notifications for user {user_id} ({user_email})...")
+                    results = notification_service.check_and_send_due_notifications(user_id=user_id)
+                    if results:
+                        logger.info(f"✅ Sent {len(results)} notification(s) for user {user_id}")
+                    else:
+                        logger.debug(f"   No notifications due for user {user_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error checking notifications for user {user_id}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            
+            logger.info("✅ Completed notification check for all users")
         except Exception as e:
             logger.error(f"❌ Error in notification check task: {e}")
             import traceback

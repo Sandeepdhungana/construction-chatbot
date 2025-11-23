@@ -148,6 +148,45 @@ BODY: [email body]""")
             if not body:
                 body = content
             
+            # Replace any remaining placeholders with actual values from context
+            if context:
+                # Replace common placeholder patterns
+                amount = context.get('payment_amount') or context.get('amount')
+                if amount:
+                    amount_str = f"${float(amount):,.2f}" if isinstance(amount, (int, float)) else str(amount)
+                    body = body.replace('[Please insert the amount]', amount_str)
+                    body = body.replace('[amount]', amount_str)
+                    body = body.replace('{amount}', amount_str)
+                
+                due_date = context.get('due_date')
+                if due_date:
+                    body = body.replace('[Please insert the due date]', str(due_date))
+                    body = body.replace('[due date]', str(due_date))
+                    body = body.replace('{due_date}', str(due_date))
+                
+                invoice_number = context.get('invoice_number')
+                if invoice_number:
+                    body = body.replace('[Please insert the invoice number]', str(invoice_number))
+                    body = body.replace('[invoice number]', str(invoice_number))
+                    body = body.replace('{invoice_number}', str(invoice_number))
+                
+                project_name = context.get('project_name')
+                if project_name:
+                    body = body.replace('[Please insert the project name]', str(project_name))
+                    body = body.replace('[project name]', str(project_name))
+                    body = body.replace('{project_name}', str(project_name))
+                
+                description = context.get('description')
+                if description:
+                    body = body.replace('[Please insert the description]', str(description))
+                    body = body.replace('[description]', str(description))
+                    body = body.replace('{description}', str(description))
+            
+            # Replace payment link placeholder
+            if payment_link:
+                body = body.replace('[Payment Link]', payment_link)
+                body = body.replace('{payment_link}', payment_link)
+            
             # Replace any remaining sender placeholders in the body
             if sender_name:
                 body = body.replace('{sender_name}', sender_name)
@@ -155,6 +194,10 @@ BODY: [email body]""")
                 body = body.replace('{from_name}', sender_name)
                 body = body.replace('[Sender Name]', sender_name)
                 body = body.replace('[Your Name]', sender_name)
+            
+            # Replace recipient name placeholders
+            body = body.replace('{recipient_name}', recipient_name)
+            body = body.replace('[Recipient Name]', recipient_name)
             
             return subject, body
         
@@ -301,6 +344,45 @@ BODY: [email body]""")
         if not body:
             body = content
         
+        # Replace any remaining placeholders with actual values from context
+        if context:
+            # Replace common placeholder patterns
+            amount = context.get('payment_amount') or context.get('amount')
+            if amount:
+                amount_str = f"${float(amount):,.2f}" if isinstance(amount, (int, float)) else str(amount)
+                body = body.replace('[Please insert the amount]', amount_str)
+                body = body.replace('[amount]', amount_str)
+                body = body.replace('{amount}', amount_str)
+            
+            due_date = context.get('due_date')
+            if due_date:
+                body = body.replace('[Please insert the due date]', str(due_date))
+                body = body.replace('[due date]', str(due_date))
+                body = body.replace('{due_date}', str(due_date))
+            
+            invoice_number = context.get('invoice_number')
+            if invoice_number:
+                body = body.replace('[Please insert the invoice number]', str(invoice_number))
+                body = body.replace('[invoice number]', str(invoice_number))
+                body = body.replace('{invoice_number}', str(invoice_number))
+            
+            project_name = context.get('project_name')
+            if project_name:
+                body = body.replace('[Please insert the project name]', str(project_name))
+                body = body.replace('[project name]', str(project_name))
+                body = body.replace('{project_name}', str(project_name))
+            
+            description = context.get('description')
+            if description:
+                body = body.replace('[Please insert the description]', str(description))
+                body = body.replace('[description]', str(description))
+                body = body.replace('{description}', str(description))
+        
+        # Replace payment link placeholder
+        if payment_link:
+            body = body.replace('[Payment Link]', payment_link)
+            body = body.replace('{payment_link}', payment_link)
+        
         # Replace any remaining sender placeholders in the body
         if sender_name:
             body = body.replace('{sender_name}', sender_name)
@@ -308,6 +390,10 @@ BODY: [email body]""")
             body = body.replace('{from_name}', sender_name)
             body = body.replace('[Sender Name]', sender_name)
             body = body.replace('[Your Name]', sender_name)
+        
+        # Replace recipient name placeholders
+        body = body.replace('{recipient_name}', recipient_name)
+        body = body.replace('[Recipient Name]', recipient_name)
         
         return subject, body
     

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from jose import jwt
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from passlib.context import CryptContext
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -332,4 +332,22 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
             "name": row["name"],
             "created_at": row["created_at"]
         }
+
+
+def get_all_users() -> List[Dict]:
+    """Get all users from the database."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users")
+        rows = cursor.fetchall()
+        
+        return [
+            {
+                "id": row["id"],
+                "email": row["email"],
+                "name": row["name"],
+                "created_at": row["created_at"]
+            }
+            for row in rows
+        ]
 
