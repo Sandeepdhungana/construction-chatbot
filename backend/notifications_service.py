@@ -444,6 +444,7 @@ BODY: [email body]""")
     def send_notification(
         self,
         schedule_id: int,
+        user_id: int,
         context: Optional[Dict] = None,
         force: bool = False
     ) -> Dict:
@@ -451,10 +452,11 @@ BODY: [email body]""")
         logger.info("")
         logger.info("🚀 STARTING NOTIFICATION SEND (Schedule-based)")
         logger.info(f"   Schedule ID: {schedule_id}")
+        logger.info(f"   User ID: {user_id}")
         logger.info(f"   Force: {force}")
         logger.info(f"   Context: {context}")
         
-        schedule = get_schedule(schedule_id)
+        schedule = get_schedule(schedule_id, user_id=user_id)
         if not schedule:
             logger.error("   ❌ Schedule not found")
             return {"success": False, "error": "Schedule not found"}
@@ -464,7 +466,7 @@ BODY: [email body]""")
             logger.warning("   ⚠️  Schedule is disabled and force=False")
             return {"success": False, "error": "Schedule is disabled"}
         
-        recipient = get_recipient(schedule['recipient_id'])
+        recipient = get_recipient(schedule['recipient_id'], user_id=user_id)
         if not recipient:
             logger.error(f"   ❌ Recipient not found (ID: {schedule['recipient_id']})")
             return {"success": False, "error": "Recipient not found"}
@@ -494,9 +496,9 @@ BODY: [email body]""")
         logger.info(f"   Looking for SMTP config (ID: {smtp_config_id})...")
         if not smtp_config_id:
             logger.info("   No SMTP config ID specified, trying to get default...")
-            smtp_config = get_smtp_config()
+            smtp_config = get_smtp_config(user_id=user_id)
         else:
-            smtp_config = get_smtp_config(config_id=smtp_config_id)
+            smtp_config = get_smtp_config(config_id=smtp_config_id, user_id=user_id)
         
         if not smtp_config:
             logger.error("   ❌ SMTP configuration not found")
@@ -545,7 +547,7 @@ BODY: [email body]""")
             'body': body,
             'status': 'sent' if success else 'failed',
             'error_message': None if success else "SMTP send failed"
-        })
+        }, user_id=user_id)
         logger.info(f"   ✓ Notification logged (status: {'sent' if success else 'failed'})")
         
         # Update schedule sent time
@@ -577,6 +579,7 @@ BODY: [email body]""")
     def send_direct_notification(
         self,
         recipient_id: int,
+        user_id: int,
         notification_type: str,
         context: Optional[Dict] = None,
         template: Optional[str] = None,
@@ -586,12 +589,13 @@ BODY: [email body]""")
         logger.info("")
         logger.info("🚀 STARTING NOTIFICATION SEND (Direct)")
         logger.info(f"   Recipient ID: {recipient_id}")
+        logger.info(f"   User ID: {user_id}")
         logger.info(f"   Notification Type: {notification_type}")
         logger.info(f"   Context: {context}")
         logger.info(f"   Has Template: {template is not None}")
         logger.info(f"   Payment Link: {payment_link}")
         
-        recipient = get_recipient(recipient_id)
+        recipient = get_recipient(recipient_id, user_id=user_id)
         if not recipient:
             logger.error(f"   ❌ Recipient not found (ID: {recipient_id})")
             return {"success": False, "error": "Recipient not found"}
@@ -599,10 +603,10 @@ BODY: [email body]""")
         
         smtp_config_id = recipient.get('smtp_config_id')
         logger.info(f"   Looking for SMTP config (ID: {smtp_config_id})...")
-        smtp_config = get_smtp_config(config_id=smtp_config_id) if smtp_config_id else None
+        smtp_config = get_smtp_config(config_id=smtp_config_id, user_id=user_id) if smtp_config_id else None
         if not smtp_config:
             logger.info("   No SMTP config ID or not found, trying to get default...")
-            smtp_config = get_smtp_config()
+            smtp_config = get_smtp_config(user_id=user_id)
         
         if not smtp_config:
             logger.error("   ❌ SMTP configuration not found")
@@ -651,7 +655,7 @@ BODY: [email body]""")
             'body': body,
             'status': 'sent' if success else 'failed',
             'error_message': None if success else "SMTP send failed"
-        })
+        }, user_id=user_id)
         logger.info(f"   ✓ Notification logged (status: {'sent' if success else 'failed'})")
         
         logger.info("")
@@ -665,11 +669,11 @@ BODY: [email body]""")
             "subject": subject
         }
     
-    def check_and_send_due_notifications(self) -> List[Dict]:
+    def check_and_send_due_notifications(self, user_id: int) -> List[Dict]:
         """Check schedules and send notifications that are due."""
         from .notifications_db import get_payment, get_worker, get_client, get_vendor
         
-        schedules = list_schedules(enabled_only=True)
+        schedules = list_schedules(user_id=user_id, enabled_only=True)
         results = []
         
         now = datetime.now()
@@ -759,7 +763,7 @@ BODY: [email body]""")
             
             if should_send:
                 try:
-                    result = self.send_notification(schedule['id'], force=True)
+                    result = self.send_notification(schedule['id'], user_id=user_id, force=True)
                     results.append(result)
                 except Exception as e:
                     logger.error(f"Error sending notification for schedule {schedule['id']}: {e}")
@@ -769,7 +773,8 @@ BODY: [email body]""")
     
     def create_payment_based_schedules(
         self, 
-        payment_id: int, 
+        payment_id: int,
+        user_id: int,
         days_before: List[int] = [7, 3, 1],
         email_template: Optional[str] = None
     ) -> List[int]:
@@ -815,7 +820,7 @@ BODY: [email body]""")
         
         # Create or get recipient
         from .notifications_db import list_recipients, create_recipient
-        recipients = list_recipients()
+        recipients = list_recipients(user_id=user_id)
         recipient = None
         for r in recipients:
             if r['email'] == recipient_email and r['type'] == entity_type:
@@ -828,7 +833,7 @@ BODY: [email body]""")
                 'email': recipient_email,
                 'type': entity_type
             }
-            recipient_id = create_recipient(recipient_data)
+            recipient_id = create_recipient(recipient_data, user_id=user_id)
             recipient = {'id': recipient_id, **recipient_data}
         else:
             recipient_id = recipient['id']
@@ -859,7 +864,7 @@ BODY: [email body]""")
                 'email_template': email_template or '',
                 'trigger_condition': f"Payment due in {days} days"
             }
-            schedule_id = create_schedule(schedule_data)
+            schedule_id = create_schedule(schedule_data, user_id=user_id)
             schedule_ids.append(schedule_id)
             logger.info(f"Created schedule {schedule_id} for payment {payment_id} ({days} days before due)")
         
@@ -879,6 +884,7 @@ BODY: [email body]""")
                 # Send immediate notification
                 result = self.send_direct_notification(
                     recipient_id=recipient_id,
+                    user_id=user_id,
                     notification_type=notification_type,
                     context=context,
                     template=email_template,

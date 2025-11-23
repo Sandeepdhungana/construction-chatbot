@@ -28,13 +28,17 @@ class VectorStoreManager:
 
     def __init__(
         self,
+        user_id: int,
         persist_directory: str = "data/vectorstore",
-        collection_name: str = "construction_docs",
+        collection_name: Optional[str] = None,
     ) -> None:
         os.makedirs(persist_directory, exist_ok=True)
         self.persist_directory = persist_directory
-        self.collection_name = collection_name
+        # Use user-specific collection name (should be email-based if provided via get_vector_manager)
+        self.collection_name = collection_name or f"construction_docs_user_{user_id}"
+        self.user_id = user_id
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+        logger.info(f"🔐 Creating vectorstore for user {user_id} - Collection: {self.collection_name}, Directory: {self.persist_directory}")
         self.vectorstore = Chroma(
             collection_name=self.collection_name,
             embedding_function=self.embeddings,
@@ -121,7 +125,7 @@ class VectorStoreManager:
             persist_directory=self.persist_directory,
         )
 
-    def delete_by_metadata(self, filename: Optional[str] = None, path: Optional[str] = None, source: Optional[str] = None) -> int:
+    def delete_by_metadata(self, filename: Optional[str] = None, path: Optional[str] = None, source: Optional[str] = None, user_id: Optional[int] = None) -> int:
         """Delete documents from Chroma by metadata filters."""
         import logging
         logger = logging.getLogger(__name__)
@@ -129,6 +133,10 @@ class VectorStoreManager:
         try:
             # Build the where clause for Chroma delete
             where_clause = {}
+            
+            # Always filter by user_id if provided
+            if user_id is not None:
+                where_clause["user_id"] = user_id
             
             if filename:
                 where_clause["filename"] = filename
@@ -173,10 +181,13 @@ class VectorStoreManager:
             return 0
 
     def retriever(self, k: int = 6, source: Optional[str] = None):
-        """Return a retriever optionally filtered by metadata source."""
+        """Return a retriever optionally filtered by metadata source and user_id."""
         search_kwargs = {"k": k}
+        # Always filter by user_id to ensure data isolation
+        filter_dict = {"user_id": self.user_id}
         if source:
-            search_kwargs["filter"] = {"source": source}
+            filter_dict["source"] = source
+        search_kwargs["filter"] = filter_dict
         return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
 
 
@@ -200,6 +211,12 @@ def _embed_documents_batch(docs_batch: List[Document]) -> tuple:
         # Generate unique IDs for each document
         ids = [str(uuid.uuid4()) for _ in docs_batch]
         
+        # Add user_id to metadata if present
+        user_id = metadatas[0].get("user_id") if metadatas else None
+        if user_id:
+            for meta in metadatas:
+                meta["user_id"] = user_id
+            
         return (embedded_vectors, metadatas, texts, ids)
     except Exception as e:
         logger.error(f"❌ Error embedding batch: {e}")
@@ -209,6 +226,33 @@ def _embed_documents_batch(docs_batch: List[Document]) -> tuple:
         return ([], [], [], [])
 
 
-vector_manager = VectorStoreManager()
+# Global vector manager - will be created per user
+# This is kept for backward compatibility but should not be used directly
+# Instead, create VectorStoreManager instances per user
+def get_vector_manager(user_id: int) -> VectorStoreManager:
+    """Get a VectorStoreManager instance for a specific user with email-based isolation."""
+    # Get user email for better isolation
+    try:
+        from .auth import get_user_by_id
+        user = get_user_by_id(user_id)
+        if user:
+            user_email = user.get("email", "").replace("@", "_at_").replace(".", "_")
+            # Use email-based collection name and persist directory
+            collection_name = f"construction_docs_user_{user_email}"
+            persist_directory = f"data/vectorstore/user_{user_email}"
+        else:
+            # Fallback to user_id if email not found
+            collection_name = f"construction_docs_user_{user_id}"
+            persist_directory = f"data/vectorstore/user_{user_id}"
+    except Exception as e:
+        logger.warning(f"Failed to get user email for user {user_id}: {e}, using user_id")
+        collection_name = f"construction_docs_user_{user_id}"
+        persist_directory = f"data/vectorstore/user_{user_id}"
+    
+    return VectorStoreManager(
+        user_id=user_id,
+        persist_directory=persist_directory,
+        collection_name=collection_name
+    )
 
 

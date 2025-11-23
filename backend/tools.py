@@ -22,7 +22,7 @@ from langchain_core.documents import Document
 from langchain_core.tools import Tool, StructuredTool
 from pydantic import BaseModel, Field
 
-from .vectorstore import VectorStoreManager, vector_manager
+from .vectorstore import VectorStoreManager
 
 
 logger = logging.getLogger(__name__)
@@ -32,58 +32,79 @@ class DataRegistry:
 
     """Stores uploaded DataFrames grouped by semantic category with structure metadata."""
 
-    def __init__(self) -> None:
-        self._frames: Dict[str, Dict[str, pd.DataFrame]] = defaultdict(dict)
+    def __init__(self, user_id: Optional[int] = None) -> None:
+        # Store data per user: {user_id: {category: {name: df}}}
+        self._frames: Dict[int, Dict[str, Dict[str, pd.DataFrame]]] = defaultdict(lambda: defaultdict(dict))
+        self._structures: Dict[int, Dict[str, Dict[str, Dict[str, Any]]]] = defaultdict(lambda: defaultdict(dict))
+        self.user_id = user_id
 
-        self._structures: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    def clear_category(self, category: str, user_id: Optional[int] = None) -> None:
+        uid = user_id or self.user_id
+        if uid is None:
+            return
+        self._frames[uid].pop(category, None)
+        self._structures[uid].pop(category, None)
 
-    def clear_category(self, category: str) -> None:
-        self._frames.pop(category, None)
+    def clear_all(self, user_id: Optional[int] = None) -> None:
+        uid = user_id or self.user_id
+        if uid is None:
+            self._frames.clear()
+            self._structures.clear()
+        else:
+            self._frames.pop(uid, None)
+            self._structures.pop(uid, None)
 
-        self._structures.pop(category, None)
-
-    def clear_all(self) -> None:
-        self._frames.clear()
-        self._structures.clear()
-
-
-    def register(self, category: str, name: str, df: pd.DataFrame, structure: Optional[Dict[str, Any]] = None) -> None:
-        self._frames[category][name] = df
-
+    def register(self, category: str, name: str, df: pd.DataFrame, structure: Optional[Dict[str, Any]] = None, user_id: Optional[int] = None) -> None:
+        uid = user_id or self.user_id
+        if uid is None:
+            raise ValueError("user_id must be provided")
+        self._frames[uid][category][name] = df
         if structure:
-            self._structures[category][name] = structure
+            self._structures[uid][category][name] = structure
 
-    def unregister(self, category: str, name: str) -> None:
-        self._frames.get(category, {}).pop(name, None)
-        self._structures.get(category, {}).pop(name, None)
+    def unregister(self, category: str, name: str, user_id: Optional[int] = None) -> None:
+        uid = user_id or self.user_id
+        if uid is None:
+            return
+        self._frames[uid].get(category, {}).pop(name, None)
+        self._structures[uid].get(category, {}).pop(name, None)
 
-    def categories(self) -> List[str]:
-        return list(self._frames.keys())
+    def categories(self, user_id: Optional[int] = None) -> List[str]:
+        uid = user_id or self.user_id
+        if uid is None:
+            return []
+        return list(self._frames[uid].keys())
 
-    def names(self, category: str) -> List[str]:
-        return list(self._frames.get(category, {}).keys())
+    def names(self, category: str, user_id: Optional[int] = None) -> List[str]:
+        uid = user_id or self.user_id
+        if uid is None:
+            return []
+        return list(self._frames[uid].get(category, {}).keys())
 
-    def get(self, category: str, name: Optional[str] = None) -> Optional[pd.DataFrame]:
-        frames = self._frames.get(category)
+    def get(self, category: str, name: Optional[str] = None, user_id: Optional[int] = None) -> Optional[pd.DataFrame]:
+        uid = user_id or self.user_id
+        if uid is None:
+            return None
+        frames = self._frames[uid].get(category)
         if not frames:
             return None
         if name:
             return frames.get(name)
-
         if len(frames) == 0:
             return None
         combined = pd.concat(frames.values(), ignore_index=True)
         return combined
 
-
-    def get_structure(self, category: str, name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_structure(self, category: str, name: Optional[str] = None, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Get structure metadata for a table."""
-        structures = self._structures.get(category)
+        uid = user_id or self.user_id
+        if uid is None:
+            return None
+        structures = self._structures[uid].get(category)
         if not structures:
             return None
         if name:
             return structures.get(name)
-        # Return combined structure info
         all_structures = list(structures.values())
         if not all_structures:
             return None
@@ -92,13 +113,16 @@ class DataRegistry:
             "tables": {name: struct for name, struct in structures.items()}
         }
 
-    def list_all_tables(self) -> Dict[str, List[Dict[str, Any]]]:
+    def list_all_tables(self, user_id: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
         """List all available tables with their metadata."""
+        uid = user_id or self.user_id
+        if uid is None:
+            return {}
         result = {}
-        for category, frames in self._frames.items():
+        for category, frames in self._frames[uid].items():
             tables = []
             for name, df in frames.items():
-                structure = self._structures.get(category, {}).get(name, {})
+                structure = self._structures[uid].get(category, {}).get(name, {})
                 tables.append({
                     "name": name,
                     "category": category,
@@ -110,11 +134,40 @@ class DataRegistry:
             result[category] = tables
         return result
 
-    def summary(self) -> Dict[str, List[str]]:
-        return {category: list(names.keys()) for category, names in self._frames.items()}
+    def summary(self, user_id: Optional[int] = None) -> Dict[str, List[str]]:
+        uid = user_id or self.user_id
+        if uid is None:
+            return {}
+        return {category: list(names.keys()) for category, names in self._frames[uid].items()}
 
 
+# Global registry instance (backward compatibility)
 data_registry = DataRegistry()
+
+# Cache for DataRegistry instances per user
+_registry_cache: Dict[int, DataRegistry] = {}
+
+# Function to get user-specific registry
+def get_data_registry(user_id: int, reload: bool = True) -> DataRegistry:
+    """Get a DataRegistry instance for a specific user and reload tables from file registry."""
+    # Always create a new instance to ensure data isolation - don't use cache
+    # Cache can cause data leakage between requests
+    registry = DataRegistry(user_id=user_id)
+    
+    # Reload tables from file registry to ensure data is available
+    if reload:
+        try:
+            # Import here to avoid circular import
+            from .ingestion import reload_tables_from_registry
+            logger.info(f"🔄 Reloading data registry for user {user_id}")
+            reload_tables_from_registry(user_id, data_registry_instance=registry)
+            # Log what was loaded
+            tables = registry.list_all_tables(user_id=user_id)
+            logger.info(f"📊 Loaded tables for user {user_id}: {tables}")
+        except Exception as e:
+            logger.warning(f"Failed to reload tables for user {user_id}: {e}")
+    
+    return registry
 
 
 def _format_docs(docs: Iterable[Document]) -> str:
@@ -154,7 +207,7 @@ def _build_pandas_agent(llm, df: pd.DataFrame) -> Any:
 
 
 
-def _generic_spreadsheet_runner(llm):
+def _generic_spreadsheet_runner(llm, registry: DataRegistry, uid: Optional[int] = None):
     """Generic spreadsheet tool runner that works with any uploaded table."""
     def _run(query: str) -> str:
         """
@@ -180,7 +233,7 @@ def _generic_spreadsheet_runner(llm):
             question = query
         
         # Get all spreadsheet tables
-        tables = data_registry.list_all_tables().get("spreadsheet", [])
+        tables = registry.list_all_tables(user_id=uid).get("spreadsheet", [])
         if not tables:
             logger.warning("⚠️  No spreadsheet tables available")
             return "No spreadsheet data has been uploaded yet. Please upload CSV or Excel files first."
@@ -190,11 +243,14 @@ def _generic_spreadsheet_runner(llm):
         # If table name specified, use that one
         if table_name:
             logger.info(f"🎯 Using specific table: {table_name}")
-            df = data_registry.get("spreadsheet", table_name)
+            df = registry.get("spreadsheet", table_name, user_id=uid)
             if df is None or df.empty:
                 available = [t["name"] for t in tables]
                 logger.warning(f"⚠️  Table '{table_name}' not found. Available: {available}")
                 return f"Table '{table_name}' not found. Available tables: {available}"
+            if df is None:
+                logger.error(f"❌ Failed to load table '{table_name}' - DataFrame is None")
+                return f"Error: Could not load table '{table_name}'. The table may not be properly registered. Please try uploading the file again."
             logger.info(f"✅ Loaded table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
             agent = _build_pandas_agent(llm, df)
         else:
@@ -218,7 +274,7 @@ def _generic_spreadsheet_runner(llm):
                     break
             
             if inferred_table:
-                df = data_registry.get("spreadsheet", inferred_table)
+                df = registry.get("spreadsheet", inferred_table, user_id=uid)
                 if df is not None and not df.empty:
                     logger.info(f"✅ Using inferred table '{inferred_table}' with {len(df)} rows, {len(df.columns)} columns")
                     agent = _build_pandas_agent(llm, df)
@@ -226,7 +282,10 @@ def _generic_spreadsheet_runner(llm):
                     # Fallback: use first table if inference failed
                     if tables:
                         first_table = tables[0]["name"]
-                        df = data_registry.get("spreadsheet", first_table)
+                        df = registry.get("spreadsheet", first_table, user_id=uid)
+                        if df is None or df.empty:
+                            logger.error(f"❌ Failed to load table '{first_table}'")
+                            return f"Error: Could not load table '{first_table}'. Please try uploading the file again."
                         logger.info(f"⚠️  Inference failed, using first available table '{first_table}'")
                         agent = _build_pandas_agent(llm, df)
                     else:
@@ -235,7 +294,10 @@ def _generic_spreadsheet_runner(llm):
                 # No inference possible, use first table (don't combine all tables)
                 if tables:
                     first_table = tables[0]["name"]
-                    df = data_registry.get("spreadsheet", first_table)
+                    df = registry.get("spreadsheet", first_table, user_id=uid)
+                    if df is None or df.empty:
+                        logger.error(f"❌ Failed to load table '{first_table}'")
+                        return f"Error: Could not load table '{first_table}'. Please try uploading the file again."
                     logger.info(f"⚠️  No table inferred, using first available table '{first_table}'. "
                               f"For multi-table queries, use Multi_Table_Analysis_Tool or specify table name.")
                     agent = _build_pandas_agent(llm, df)
@@ -271,7 +333,7 @@ def _generic_spreadsheet_runner(llm):
 
 
 
-def _multi_table_analysis_runner(llm):
+def _multi_table_analysis_runner(llm, registry: DataRegistry, uid: Optional[int] = None):
     """Tool for analyzing across multiple tables with joins and aggregations."""
     def _run(analysis_request: str) -> str:
         """
@@ -279,7 +341,7 @@ def _multi_table_analysis_runner(llm):
         Format: tables=<table1,table2>::operation=<description>
         Or natural language describing the multi-table operation.
         """
-        tables = data_registry.list_all_tables().get("spreadsheet", [])
+        tables = registry.list_all_tables(user_id=uid).get("spreadsheet", [])
         if len(tables) < 1:
             return "Need at least one table for analysis. Upload CSV/Excel files first."
         
@@ -303,13 +365,13 @@ def _multi_table_analysis_runner(llm):
         dfs = {}
         if table_names:
             for name in table_names:
-                df = data_registry.get("spreadsheet", name)
+                df = registry.get("spreadsheet", name, user_id=uid)
                 if df is not None:
                     dfs[name] = df
         else:
             # Use all tables
             for table_info in tables:
-                df = data_registry.get("spreadsheet", table_info["name"])
+                df = registry.get("spreadsheet", table_info["name"], user_id=uid)
                 if df is not None:
                     dfs[table_info["name"]] = df
         
@@ -358,65 +420,60 @@ class ListTablesInput(BaseModel):
     """Input schema for List_Available_Tables tool."""
     query: str = Field(default="", description="Optional query string. Can be empty - tool lists all tables regardless.")
 
-def _list_tables_runner(query: str = "") -> str:
-    """List all available spreadsheet tables with their structures.
-    
-    Args:
-        query: Optional query string (can be empty). The tool works the same regardless of query.
-    """
-    # Handle different input types (string or dict from agent)
-    if isinstance(query, dict):
-        # Extract the actual query string from dict format
-        query_str = query.get('__arg1', query.get('query', ''))
-    else:
-        query_str = str(query) if query else ""
-    
-    logger.info(f"📋 Listing all available tables...")
-    
-    # Check what's in the registry
-    all_categories = data_registry.categories()
-    logger.info(f"📊 Data registry categories: {all_categories}")
-    
-    tables_info = data_registry.list_all_tables()
-    logger.info(f"📊 Tables info: {tables_info}")
-    
-    if not tables_info:
-        logger.warning("⚠️  No tables found in registry, attempting to reload from file registry...")
-        # Try to reload tables from file registry
-        try:
-            from .ingestion import reload_tables_from_registry
-            reloaded = reload_tables_from_registry()
-            if reloaded > 0:
-                logger.info(f"✅ Reloaded {reloaded} table(s) from file registry")
-                tables_info = data_registry.list_all_tables()
-            else:
-                summary = data_registry.summary()
-                logger.info(f"📊 Registry summary: {summary}")
-                return "No tables have been uploaded yet. Please upload CSV or Excel files first."
-        except Exception as e:
-            logger.error(f"❌ Error reloading tables: {e}")
-            summary = data_registry.summary()
+
+class PaymentQueryInput(BaseModel):
+    """Input schema for payment-related tools."""
+    query: str = Field(default="", description="Optional query string. Can be empty string or JSON with filters like payment_type, entity_type, status.")
+
+
+class NotificationQueryInput(BaseModel):
+    """Input schema for notification-related tools."""
+    query: str = Field(default="", description="Optional query string. Can be empty string or filter parameters.")
+
+def _list_tables_runner(registry: DataRegistry, uid: Optional[int] = None):
+    """List all available spreadsheet tables with their structures."""
+    def _run(query: str = "") -> str:
+        # Handle different input types (string or dict from agent)
+        if isinstance(query, dict):
+            # Extract the actual query string from dict format
+            query_str = query.get('__arg1', query.get('query', ''))
+        else:
+            query_str = str(query) if query else ""
+        
+        logger.info(f"📋 Listing all available tables...")
+        
+        # Check what's in the registry
+        all_categories = registry.categories(user_id=uid)
+        logger.info(f"📊 Data registry categories: {all_categories}")
+        
+        tables_info = registry.list_all_tables(user_id=uid)
+        logger.info(f"📊 Tables info: {tables_info}")
+        
+        if not tables_info:
+            logger.warning("⚠️  No tables found in registry")
+            summary = registry.summary(user_id=uid)
             logger.info(f"📊 Registry summary: {summary}")
             return "No tables have been uploaded yet. Please upload CSV or Excel files first."
-    
-    result_lines = []
-    for category, tables in tables_info.items():
-        result_lines.append(f"\n{category.upper()} Tables:")
-        logger.info(f"📋 Category '{category}': {len(tables)} table(s)")
-        for table in tables:
-            result_lines.append(f"\n  Table: {table['name']}")
-            result_lines.append(f"    Rows: {table['rows']}, Columns: {table['columns']}")
-            result_lines.append(f"    Columns: {', '.join(table['column_names'])}")
-            if table.get('structure'):
-                structure = table['structure']
-                if structure.get('numeric_columns'):
-                    result_lines.append(f"    Numeric columns: {', '.join(structure['numeric_columns'])}")
-                if structure.get('potential_keys'):
-                    result_lines.append(f"    Potential keys: {', '.join(structure['potential_keys'])}")
-    
-    result = "\n".join(result_lines)
-    logger.info(f"✅ Listed {sum(len(tables) for tables in tables_info.values())} table(s)")
-    return result
+        
+        result_lines = []
+        for category, tables in tables_info.items():
+            result_lines.append(f"\n{category.upper()} Tables:")
+            logger.info(f"📋 Category '{category}': {len(tables)} table(s)")
+            for table in tables:
+                result_lines.append(f"\n  Table: {table['name']}")
+                result_lines.append(f"    Rows: {table['rows']}, Columns: {table['columns']}")
+                result_lines.append(f"    Columns: {', '.join(table['column_names'])}")
+                if table.get('structure'):
+                    structure = table['structure']
+                    if structure.get('numeric_columns'):
+                        result_lines.append(f"    Numeric columns: {', '.join(structure['numeric_columns'])}")
+                    if structure.get('potential_keys'):
+                        result_lines.append(f"    Potential keys: {', '.join(structure['potential_keys'])}")
+        
+        result = "\n".join(result_lines)
+        logger.info(f"✅ Listed {sum(len(tables) for tables in tables_info.values())} table(s)")
+        return result
+    return _run
 
 
 def _synthesis_tool_runner(llm):
@@ -443,9 +500,14 @@ def _synthesis_tool_runner(llm):
     return _run
 
 
-def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]:
-
+def build_tools(llm, manager: VectorStoreManager, data_registry: Optional[DataRegistry] = None, user_id: Optional[int] = None) -> List[Tool]:
     """Build all available tools for the agent."""
+    # Use provided registry or get user-specific one
+    if data_registry is None:
+        if user_id is not None:
+            data_registry = get_data_registry(user_id)
+        else:
+            data_registry = DataRegistry()  # Fallback
     
     # Document retrievers
     pdf_retriever = manager.retriever(source="pdf")
@@ -516,7 +578,7 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
         # Spreadsheet tools (generic, file-agnostic)
         Tool(
             name="Generic_Spreadsheet_Query_Tool",
-            func=_generic_spreadsheet_runner(llm),
+            func=_generic_spreadsheet_runner(llm, data_registry, user_id),
             description=(
                 "MANDATORY FOR CSV/EXCEL QUERIES: Use to query ANY uploaded spreadsheet table (CSV or Excel) using natural language. "
                 "ALWAYS call List_Available_Tables FIRST to see what tables and columns exist. "
@@ -536,7 +598,7 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
         ),
         Tool(
             name="Multi_Table_Analysis_Tool",
-            func=_multi_table_analysis_runner(llm),
+            func=_multi_table_analysis_runner(llm, data_registry, user_id),
             description=(
                 "MANDATORY FOR MULTI-TABLE QUERIES: Use for complex operations across MULTIPLE spreadsheet tables. "
                 "CRITICAL: When information spans multiple CSV/Excel files, you MUST use this tool to combine data. "
@@ -551,9 +613,9 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
                 "Don't just search one table - if multiple tables have relevant data, use this tool to analyze them together."
             ),
         ),
-        StructuredTool.from_function(
-            func=_list_tables_runner,
+        Tool(
             name="List_Available_Tables",
+            func=_list_tables_runner(data_registry, user_id),
             description=(
                 "MANDATORY FIRST STEP: Use this to see what CSV/Excel tables are available, their column names, row counts, and structure information. "
                 "ALWAYS call this FIRST before querying spreadsheets to understand what data is available. "
@@ -561,7 +623,6 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
                 "You can call this tool with an empty string or any query - it will list all tables regardless. "
                 "After seeing available tables, use Generic_Spreadsheet_Query_Tool to query the data."
             ),
-            args_schema=ListTablesInput,
         ),
         
         # Row-level retrieval tools
@@ -593,37 +654,39 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
                 "and 'payment_link' (optional URL). Example: '{\"recipient_id\": 1, \"notification_type\": \"payment_reminder\", \"context\": {\"amount\": 5000, \"due_date\": \"2024-01-15\"}}'"
             ),
         ),
-        Tool(
+        StructuredTool.from_function(
+            func=_list_recipients_runner(user_id) if user_id else lambda q: "User ID required",
             name="List_Notification_Recipients",
-            func=lambda query="": _list_recipients_runner(query),
             description=(
                 "List all notification recipients (vendors, workers, clients). "
                 "Use this to find recipient IDs when you need to send notifications. "
                 "Optional query parameter to filter by type: 'vendor', 'worker', or 'client'."
             ),
+            args_schema=NotificationQueryInput,
         ),
-        Tool(
+        StructuredTool.from_function(
+            func=_list_schedules_runner(user_id) if user_id else lambda q: "User ID required",
             name="List_Notification_Schedules",
-            func=lambda query="": _list_schedules_runner(query),
             description=(
                 "List all notification schedules. Use this to see what automated notifications are configured. "
                 "Shows schedules with their recipients, types, intervals, and status."
             ),
+            args_schema=NotificationQueryInput,
         ),
-        Tool(
-
+        StructuredTool.from_function(
+            func=_get_notification_history_runner(user_id) if user_id else lambda q: "User ID required",
             name="Get_Notification_History",
-            func=lambda query="": _get_notification_history_runner(query),
             description=(
                 "Get notification history/logs. Use this to check what notifications have been sent recently. "
                 "Optional query can specify recipient_id as a number to filter by recipient."
             ),
+            args_schema=NotificationQueryInput,
         ),
         
         # Payment Tools
-        Tool(
+        StructuredTool.from_function(
+            func=_list_payments_runner(user_id) if user_id else lambda q: "User ID required",
             name="List_Payments",
-            func=lambda query="": _list_payments_runner(query),
             description=(
                 "MANDATORY FOR PAYMENT QUESTIONS: List all payments in the ERP system. Shows payment type (receive/send), amounts, due dates, status, and related entities. "
                 "ALWAYS call this when questions involve payments, invoices, or financial transactions. "
@@ -632,27 +695,26 @@ def build_tools(llm, manager: VectorStoreManager = vector_manager) -> List[Tool]
                 "Example: '{\"payment_type\": \"receive\", \"status\": \"pending\"}' "
                 "Use this tool together with Generic_Spreadsheet_Query_Tool and document retrievers for complete answers."
             ),
+            args_schema=PaymentQueryInput,
         ),
-        Tool(
-
+        StructuredTool.from_function(
+            func=_get_payments_due_soon_runner(user_id) if user_id else lambda q: "User ID required",
             name="Get_Payments_Due_Soon",
-            func=lambda query="": _get_payments_due_soon_runner(query),
             description=(
-
                 "Get payments that are due soon. Shows payments due within specified days (default 7). "
                 "Useful for identifying which payments need reminders sent. "
                 "Optional query can specify days as a number (e.g., '14' for 14 days)."
             ),
+            args_schema=PaymentQueryInput,
         ),
-        Tool(
-
+        StructuredTool.from_function(
+            func=_get_overdue_payments_runner(user_id) if user_id else lambda q: "User ID required",
             name="Get_Overdue_Payments",
-            func=lambda query="": _get_overdue_payments_runner(query),
             description=(
-
                 "Get all overdue payments. Shows payments that are past their due date and still pending. "
                 "Useful for identifying urgent payment reminders needed."
             ),
+            args_schema=PaymentQueryInput,
         ),
         Tool(
 
@@ -719,227 +781,262 @@ def _send_notification_runner(request_str: str) -> str:
         return f"Error sending notification: {str(e)}"
 
 
-def _list_recipients_runner(query: str = "") -> str:
+def _list_recipients_runner(user_id: int):
     """List notification recipients."""
-    try:
-        from .notifications_db import list_recipients
-        
-        if isinstance(query, dict):
-            recipient_type = query.get('type') or query.get('__arg1', '')
-        else:
-            recipient_type = str(query).strip() if query else None
-        
-        if recipient_type and recipient_type.lower() in ['vendor', 'worker', 'client']:
-            recipients = list_recipients(recipient_type=recipient_type.lower())
-        else:
-            recipients = list_recipients()
-        
-        if not recipients:
-            return "No recipients found. Add recipients in the Notifications section."
-        
-        result_lines = []
-        for rec in recipients:
-            result_lines.append(f"\nID: {rec['id']} - {rec['name']} ({rec['type']})")
-            result_lines.append(f"  Email: {rec['email']}")
-            if rec.get('company'):
-                result_lines.append(f"  Company: {rec['company']}")
-            if rec.get('phone'):
-                result_lines.append(f"  Phone: {rec['phone']}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in List_Notification_Recipients tool: {e}")
-        return f"Error listing recipients: {str(e)}"
+    def _run(query: str = "") -> str:
+        try:
+            from .notifications_db import list_recipients
+            
+            # Handle None or empty query
+            if not query:
+                query = ""
+            
+            if isinstance(query, dict):
+                recipient_type = query.get('type') or query.get('__arg1', '')
+            else:
+                recipient_type = str(query).strip() if query else None
+            
+            if recipient_type and recipient_type.lower() in ['vendor', 'worker', 'client']:
+                recipients = list_recipients(user_id=user_id, recipient_type=recipient_type.lower())
+            else:
+                recipients = list_recipients(user_id=user_id)
+            
+            if not recipients:
+                return "No recipients found. Add recipients in the Notifications section."
+            
+            result_lines = []
+            for rec in recipients:
+                result_lines.append(f"\nID: {rec['id']} - {rec['name']} ({rec['type']})")
+                result_lines.append(f"  Email: {rec['email']}")
+                if rec.get('company'):
+                    result_lines.append(f"  Company: {rec['company']}")
+                if rec.get('phone'):
+                    result_lines.append(f"  Phone: {rec['phone']}")
+            
+            return "\n".join(result_lines)
+        except Exception as e:
+            logger.error(f"Error in List_Notification_Recipients tool: {e}")
+            return f"Error listing recipients: {str(e)}"
+    return _run
 
 
-def _list_schedules_runner(query: str = "") -> str:
+def _list_schedules_runner(user_id: int):
     """List notification schedules."""
-    try:
-        from .notifications_db import list_schedules, get_recipient
-        
-        schedules = list_schedules()
-        
-        if not schedules:
-            return "No notification schedules found. Create schedules in the Notifications section."
-        
-        result_lines = []
-        for sched in schedules:
-            recipient = get_recipient(sched['recipient_id'])
-            recipient_name = recipient['name'] if recipient else f"ID {sched['recipient_id']}"
-            status = "✅ Enabled" if sched.get('enabled') else "❌ Disabled"
-            result_lines.append(f"\nSchedule ID: {sched['id']} - {sched['name']} ({status})")
-            result_lines.append(f"  Recipient: {recipient_name} ({recipient['type'] if recipient else 'unknown'})")
-            result_lines.append(f"  Type: {sched['notification_type']}")
-            result_lines.append(f"  Interval: Every {sched.get('interval_days', 7)} days")
-            if sched.get('next_send_at'):
-                result_lines.append(f"  Next send: {sched['next_send_at']}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in List_Notification_Schedules tool: {e}")
-        return f"Error listing schedules: {str(e)}"
+    def _run(query: str = "") -> str:
+        try:
+            from .notifications_db import list_schedules, get_recipient
+            
+            # Handle None or empty query (not used but required by Tool signature)
+            query = query or ""
+            
+            schedules = list_schedules(user_id=user_id)
+            
+            if not schedules:
+                return "No notification schedules found. Create schedules in the Notifications section."
+            
+            result_lines = []
+            for sched in schedules:
+                recipient = get_recipient(sched['recipient_id'], user_id=user_id)
+                recipient_name = recipient['name'] if recipient else f"ID {sched['recipient_id']}"
+                status = "✅ Enabled" if sched.get('enabled') else "❌ Disabled"
+                result_lines.append(f"\nSchedule ID: {sched['id']} - {sched['name']} ({status})")
+                result_lines.append(f"  Recipient: {recipient_name} ({recipient['type'] if recipient else 'unknown'})")
+                result_lines.append(f"  Type: {sched['notification_type']}")
+                result_lines.append(f"  Interval: Every {sched.get('interval_days', 7)} days")
+                if sched.get('next_send_at'):
+                    result_lines.append(f"  Next send: {sched['next_send_at']}")
+            
+            return "\n".join(result_lines)
+        except Exception as e:
+            logger.error(f"Error in List_Notification_Schedules tool: {e}")
+            return f"Error listing schedules: {str(e)}"
+    return _run
 
 
-def _get_notification_history_runner(query: str = "") -> str:
+def _get_notification_history_runner(user_id: int):
     """Get notification history."""
-    try:
-        from .notifications_db import get_notification_history, get_recipient
-        
-        recipient_id = None
-        if isinstance(query, dict):
-            recipient_id = query.get('recipient_id') or query.get('__arg1')
-        elif query:
-            try:
-                recipient_id = int(query)
-            except:
-                pass
-        
-        history = get_notification_history(limit=20, recipient_id=recipient_id)
-        
-        if not history:
-            return "No notification history found."
-        
-        result_lines = []
-        for entry in history[:10]:  # Show last 10
-            recipient = get_recipient(entry['recipient_id'])
-            recipient_name = recipient['name'] if recipient else f"ID {entry['recipient_id']}"
-            status_icon = "✅" if entry['status'] == 'sent' else "❌"
-            result_lines.append(f"\n{status_icon} {entry['sent_at']} - {recipient_name}")
-            result_lines.append(f"  Subject: {entry['subject']}")
-            result_lines.append(f"  Type: {entry['notification_type']}")
-            if entry.get('error_message'):
-                result_lines.append(f"  Error: {entry['error_message']}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in Get_Notification_History tool: {e}")
-        return f"Error getting notification history: {str(e)}"
+    def _run(query: str = "") -> str:
+        try:
+            from .notifications_db import get_notification_history, get_recipient
+            
+            # Handle None or empty query
+            if not query:
+                query = ""
+            
+            recipient_id = None
+            if isinstance(query, dict):
+                recipient_id = query.get('recipient_id') or query.get('__arg1')
+            elif query:
+                try:
+                    recipient_id = int(query)
+                except:
+                    pass
+            
+            history = get_notification_history(user_id=user_id, limit=20, recipient_id=recipient_id)
+            
+            if not history:
+                return "No notification history found."
+            
+            result_lines = []
+            for entry in history[:10]:  # Show last 10
+                recipient = get_recipient(entry['recipient_id'], user_id=user_id)
+                recipient_name = recipient['name'] if recipient else f"ID {entry['recipient_id']}"
+                status_icon = "✅" if entry['status'] == 'sent' else "❌"
+                result_lines.append(f"\n{status_icon} {entry['sent_at']} - {recipient_name}")
+                result_lines.append(f"  Subject: {entry['subject']}")
+                result_lines.append(f"  Type: {entry['notification_type']}")
+                if entry.get('error_message'):
+                    result_lines.append(f"  Error: {entry['error_message']}")
+            
+            return "\n".join(result_lines)
+        except Exception as e:
+            logger.error(f"Error in Get_Notification_History tool: {e}")
+            return f"Error getting notification history: {str(e)}"
+    return _run
 
 
 # Payment tool runners
-def _list_payments_runner(query: str = "") -> str:
+def _list_payments_runner(user_id: int):
     """List payments."""
-    try:
-        import json
-        from .notifications_db import list_payments
-        
-        payment_type = None
-        entity_type = None
-        status = None
-        
-        if isinstance(query, dict):
-            payment_type = query.get('payment_type')
-            entity_type = query.get('entity_type')
-            status = query.get('status')
-        elif query:
-            try:
-                params = json.loads(query)
-                payment_type = params.get('payment_type')
-                entity_type = params.get('entity_type')
-                status = params.get('status')
-            except:
-                pass
-        
-        payments = list_payments(
-            payment_type=payment_type,
-            entity_type=entity_type,
-            status=status,
-            limit=50
-        )
-        
-        if not payments:
-            return "No payments found matching criteria."
-        
-        result_lines = [f"\n💰 Payments ({len(payments)} total):"]
-        for p in payments[:20]:  # Show first 20
-            entity_type = p['entity_type']
-            entity_id = p['entity_id']
+    def _run(query: str = "") -> str:
+        try:
+            import json
+            from .notifications_db import list_payments
             
-            # Get entity name
-            entity_name = f"{entity_type} {entity_id}"
+            # Handle None or empty query
+            if not query:
+                query = ""
             
-            payment_dir = "📥 Receive" if p['payment_type'] == 'receive' else "📤 Send"
-            result_lines.append(f"\n  {payment_dir} - ID: {p['id']}")
-            result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
-            result_lines.append(f"    To/From: {entity_name} ({entity_type})")
-            result_lines.append(f"    Due Date: {p.get('due_date', 'N/A')}")
-            result_lines.append(f"    Status: {p.get('status', 'N/A')}")
-            if p.get('project_name'):
-                result_lines.append(f"    Project: {p['project_name']}")
-            if p.get('invoice_number'):
-                result_lines.append(f"    Invoice: {p['invoice_number']}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in List_Payments tool: {e}")
-        return f"Error listing payments: {str(e)}"
+            payment_type = None
+            entity_type = None
+            status = None
+            
+            if isinstance(query, dict):
+                payment_type = query.get('payment_type')
+                entity_type = query.get('entity_type')
+                status = query.get('status')
+            elif query:
+                try:
+                    params = json.loads(query)
+                    payment_type = params.get('payment_type')
+                    entity_type = params.get('entity_type')
+                    status = params.get('status')
+                except:
+                    pass
+            
+            payments = list_payments(
+                user_id=user_id,
+                payment_type=payment_type,
+                entity_type=entity_type,
+                status=status,
+                limit=50
+            )
+            
+            if not payments:
+                return "No payments found matching criteria."
+            
+            result_lines = [f"\n💰 Payments ({len(payments)} total):"]
+            for p in payments[:20]:  # Show first 20
+                entity_type = p['entity_type']
+                entity_id = p['entity_id']
+                
+                # Get entity name
+                entity_name = f"{entity_type} {entity_id}"
+                
+                payment_dir = "📥 Receive" if p['payment_type'] == 'receive' else "📤 Send"
+                result_lines.append(f"\n  {payment_dir} - ID: {p['id']}")
+                result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
+                result_lines.append(f"    To/From: {entity_name} ({entity_type})")
+                result_lines.append(f"    Due Date: {p.get('due_date', 'N/A')}")
+                result_lines.append(f"    Status: {p.get('status', 'N/A')}")
+                if p.get('project_name'):
+                    result_lines.append(f"    Project: {p['project_name']}")
+                if p.get('invoice_number'):
+                    result_lines.append(f"    Invoice: {p['invoice_number']}")
+            
+            return "\n".join(result_lines)
+        except Exception as e:
+            logger.error(f"Error in List_Payments tool: {e}")
+            return f"Error listing payments: {str(e)}"
+    return _run
 
 
-def _get_payments_due_soon_runner(query: str = "") -> str:
+def _get_payments_due_soon_runner(user_id: int):
     """Get payments due soon."""
-    try:
-        from .notifications_db import get_payments_due_soon
-        
-        days = 7
-        if isinstance(query, dict):
-            days = int(query.get('days', query.get('__arg1', 7)))
-        elif query:
-            try:
-                days = int(query)
-            except:
-                pass
-        
-        payments = get_payments_due_soon(days=days)
-        
-        if not payments:
-            return f"No payments due within {days} days."
-        
-        result_lines = [f"\n⏰ Payments Due Soon (within {days} days):"]
-        for p in payments:
-            entity_type = p['entity_type']
-            entity_id = p['entity_id']
+    def _run(query: str = "") -> str:
+        try:
+            from .notifications_db import get_payments_due_soon
             
-            # Get entity name
-            entity_name = f"{entity_type} {entity_id}"
-            payment_dir = "📥 Receive from" if p['payment_type'] == 'receive' else "📤 Pay to"
-            result_lines.append(f"\n  {payment_dir} {entity_name}")
-            result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
-            result_lines.append(f"    Due Date: {p.get('due_date', 'N/A')}")
-            result_lines.append(f"    Invoice: {p.get('invoice_number', 'N/A')}")
+            # Handle None or empty query
+            if not query:
+                query = ""
+            
+            days = 7
+            if isinstance(query, dict):
+                days = int(query.get('days', query.get('__arg1', 7)))
+            elif query:
+                try:
+                    days = int(query)
+                except:
+                    pass
+            
+            payments = get_payments_due_soon(user_id=user_id, days=days)
         
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in Get_Payments_Due_Soon tool: {e}")
-        return f"Error getting payments due soon: {str(e)}"
+            if not payments:
+                return f"No payments due within {days} days."
+            
+            result_lines = [f"\n⏰ Payments Due Soon (within {days} days):"]
+            for p in payments:
+                entity_type = p['entity_type']
+                entity_id = p['entity_id']
+                
+                # Get entity name
+                entity_name = f"{entity_type} {entity_id}"
+                payment_dir = "📥 Receive from" if p['payment_type'] == 'receive' else "📤 Pay to"
+                result_lines.append(f"\n  {payment_dir} {entity_name}")
+                result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
+                result_lines.append(f"    Due Date: {p.get('due_date', 'N/A')}")
+                result_lines.append(f"    Invoice: {p.get('invoice_number', 'N/A')}")
+            
+                return "\n".join(result_lines)
+        except Exception as e:
+            logger.error(f"Error in Get_Payments_Due_Soon tool: {e}")
+            return f"Error getting payments due soon: {str(e)}"
+    return _run
 
 
-def _get_overdue_payments_runner(query: str = "") -> str:
+def _get_overdue_payments_runner(user_id: int):
     """Get overdue payments."""
-    try:
-        from .notifications_db import get_overdue_payments
-        
-        payments = get_overdue_payments()
-        
-        if not payments:
-            return "No overdue payments found."
-        
-        result_lines = [f"\n🚨 Overdue Payments ({len(payments)} total):"]
-        for p in payments:
-            entity_type = p['entity_type']
-            entity_id = p['entity_id']
+    def _run(query: str = "") -> str:
+        try:
+            from .notifications_db import get_overdue_payments
             
-            # Get entity name
-            entity_name = f"{entity_type} {entity_id}"
-            payment_dir = "📥 Receive from" if p['payment_type'] == 'receive' else "📤 Pay to"
-            result_lines.append(f"\n  {payment_dir} {entity_name}")
-            result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
-            result_lines.append(f"    Due Date: {p.get('due_date', 'N/A')} (OVERDUE)")
-            result_lines.append(f"    Invoice: {p.get('invoice_number', 'N/A')}")
-        
-        return "\n".join(result_lines)
-    except Exception as e:
-        logger.error(f"Error in Get_Overdue_Payments tool: {e}")
-        return f"Error getting overdue payments: {str(e)}"
+            # Handle None or empty query (not used but required by Tool signature)
+            query = query or ""
+            
+            payments = get_overdue_payments(user_id=user_id)
+            
+            if not payments:
+                return "No overdue payments found."
+            
+            result_lines = [f"\n🚨 Overdue Payments ({len(payments)} total):"]
+            for p in payments:
+                entity_type = p['entity_type']
+                entity_id = p['entity_id']
+                
+                # Get entity name
+                entity_name = f"{entity_type} {entity_id}"
+                payment_dir = "📥 Receive from" if p['payment_type'] == 'receive' else "📤 Pay to"
+                result_lines.append(f"\n  {payment_dir} {entity_name}")
+                result_lines.append(f"    Amount: ${p.get('amount', 0):,.2f}")
+                result_lines.append(f"    Due Date: {p.get('due_date', 'N/A')} (OVERDUE)")
+                result_lines.append(f"    Invoice: {p.get('invoice_number', 'N/A')}")
+            
+            return "\n".join(result_lines)
+        except Exception as e:
+            logger.error(f"Error in Get_Overdue_Payments tool: {e}")
+            return f"Error getting overdue payments: {str(e)}"
+    return _run
 
 
 def _create_payment_reminder_schedules_runner(query: str = "") -> str:

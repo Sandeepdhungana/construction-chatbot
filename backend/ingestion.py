@@ -44,27 +44,31 @@ except ImportError:
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .tools import data_registry
-from .vectorstore import VectorStoreManager, vector_manager
+from .tools import data_registry, get_data_registry
+from .vectorstore import VectorStoreManager
 
 UPLOAD_ROOT = Path("data/uploads")
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
-# File registry to track uploaded files and their metadata
-FILE_REGISTRY_PATH = UPLOAD_ROOT / "file_registry.json"
+# File registry to track uploaded files and their metadata (per user)
+def get_file_registry_path(user_id: int) -> Path:
+    """Get file registry path for a specific user."""
+    return UPLOAD_ROOT / f"file_registry_user_{user_id}.json"
 
 
-def _load_file_registry() -> Dict[str, Any]:
-    """Load the file registry from disk."""
-    if FILE_REGISTRY_PATH.exists():
-        with open(FILE_REGISTRY_PATH, "r") as f:
+def _load_file_registry(user_id: int) -> Dict[str, Any]:
+    """Load the file registry from disk for a specific user."""
+    registry_path = get_file_registry_path(user_id)
+    if registry_path.exists():
+        with open(registry_path, "r") as f:
             return json.load(f)
     return {}
 
 
-def _save_file_registry(registry: Dict[str, Any]) -> None:
-    """Save the file registry to disk."""
-    with open(FILE_REGISTRY_PATH, "w") as f:
+def _save_file_registry(registry: Dict[str, Any], user_id: int) -> None:
+    """Save the file registry to disk for a specific user."""
+    registry_path = get_file_registry_path(user_id)
+    with open(registry_path, "w") as f:
         json.dump(registry, f, indent=2, default=str)
 
 
@@ -79,8 +83,24 @@ def _get_file_metadata(file_path: Path) -> Dict[str, Any]:
     }
 
 
-def _timestamp_folder() -> Path:
-    return UPLOAD_ROOT / datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+def _timestamp_folder(user_id: int, user_email: Optional[str] = None) -> Path:
+    """Get timestamped folder for user uploads using email if available."""
+    # Get user email if not provided
+    if user_email is None:
+        from .auth import get_user_by_id
+        user = get_user_by_id(user_id)
+        if user:
+            user_email = user.get("email", "").replace("@", "_at_").replace(".", "_")
+        else:
+            user_email = f"user_{user_id}"
+    
+    # Sanitize email for filesystem (replace @ with _at_ and . with _)
+    if "@" in user_email:
+        user_email = user_email.replace("@", "_at_").replace(".", "_")
+    
+    user_upload_dir = UPLOAD_ROOT / f"user_{user_email}"
+    user_upload_dir.mkdir(parents=True, exist_ok=True)
+    return user_upload_dir / datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 
 async def save_uploads(
@@ -96,7 +116,7 @@ async def save_uploads(
     return saved_paths
 
 
-def _chunk_pdfs(pdf_paths: Iterable[Path]) -> List[Document]:
+def _chunk_pdfs(pdf_paths: Iterable[Path], user_id: int) -> List[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1200,
         chunk_overlap=150,
@@ -113,13 +133,14 @@ def _chunk_pdfs(pdf_paths: Iterable[Path]) -> List[Document]:
                     "source": "pdf",
                     "filename": path.name,
                     "path": str(path),
+                    "user_id": user_id,
                 }
             )
         documents.extend(chunks)
     return documents
 
 
-def _chunk_docx(docx_paths: Iterable[Path]) -> List[Document]:
+def _chunk_docx(docx_paths: Iterable[Path], user_id: int) -> List[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1200,
         chunk_overlap=150,
@@ -147,6 +168,7 @@ def _chunk_docx(docx_paths: Iterable[Path]) -> List[Document]:
                         "source": "docx",
                         "filename": path.name,
                         "path": str(path),
+                        "user_id": user_id,
                     }
                 )
             documents.extend(chunks)
@@ -155,7 +177,7 @@ def _chunk_docx(docx_paths: Iterable[Path]) -> List[Document]:
     return documents
 
 
-def _chunk_pptx(pptx_paths: Iterable[Path]) -> List[Document]:
+def _chunk_pptx(pptx_paths: Iterable[Path], user_id: int) -> List[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1200,
         chunk_overlap=150,
@@ -188,6 +210,7 @@ def _chunk_pptx(pptx_paths: Iterable[Path]) -> List[Document]:
                         "source": "pptx",
                         "filename": path.name,
                         "path": str(path),
+                        "user_id": user_id,
                     }
                 )
             documents.extend(chunks)
@@ -209,7 +232,7 @@ def _extract_image_text(image_path: Path) -> str:
         return f"[Image file: {image_path.name} - OCR extraction failed: {str(e)}]"
 
 
-def _chunk_images(image_paths: Iterable[Path]) -> List[Document]:
+def _chunk_images(image_paths: Iterable[Path], user_id: int) -> List[Document]:
     documents: List[Document] = []
     for path in image_paths:
         text = _extract_image_text(path)
@@ -221,6 +244,7 @@ def _chunk_images(image_paths: Iterable[Path]) -> List[Document]:
                         "source": "image",
                         "filename": path.name,
                         "path": str(path),
+                        "user_id": user_id,
                     }
                 )
             )
@@ -331,9 +355,10 @@ def _excel_documents(path: Path, source_label: str) -> Tuple[List[Document], Dic
     return all_docs, sheets, structures
 
 
-def _register_dataframe(category: str, name: str, df: pd.DataFrame, structure: Optional[Dict[str, Any]] = None) -> None:
+def _register_dataframe(category: str, name: str, df: pd.DataFrame, structure: Optional[Dict[str, Any]] = None, user_id: Optional[int] = None) -> None:
     """Register a DataFrame with optional structure metadata."""
-    data_registry.register(category, name, df, structure)
+    user_registry = get_data_registry(user_id) if user_id is not None else data_registry
+    user_registry.register(category, name, df, structure, user_id=user_id)
 
 
 def _get_file_type(file_path: Path) -> str:
@@ -357,16 +382,30 @@ def _get_file_type(file_path: Path) -> str:
 
 async def ingest_files(
     files: List[UploadFile],
-    manager: VectorStoreManager = vector_manager,
+    user_id: int,
+    manager: Optional[VectorStoreManager] = None,
 ) -> dict:
     """Generic file ingestion supporting all file types."""
-    ingestion_dir = _timestamp_folder()
+    # Create user-specific vectorstore manager if not provided
+    if manager is None:
+        from .vectorstore import get_vector_manager
+        manager = get_vector_manager(user_id)
+    
+    # Get user email for folder naming
+    from .auth import get_user_by_id
+    user = get_user_by_id(user_id)
+    user_email = user.get("email") if user else None
+    
+    # Get user-specific data registry
+    user_registry = get_data_registry(user_id)
+    
+    ingestion_dir = _timestamp_folder(user_id, user_email=user_email)
     ingestion_dir.mkdir(parents=True, exist_ok=True)
     
     saved_paths = await save_uploads(files, ingestion_dir)
     
     all_docs: List[Document] = []
-    file_registry = _load_file_registry()
+    file_registry = _load_file_registry(user_id)
     
     # Group files by type
     pdfs = []
@@ -383,6 +422,7 @@ async def ingest_files(
         file_registry[file_id] = {
             **file_meta,
             "type": file_type,
+            "user_id": user_id,
         }
         
         if file_type == "pdf":
@@ -400,19 +440,19 @@ async def ingest_files(
     
     # Process PDFs
     if pdfs:
-        all_docs.extend(_chunk_pdfs(pdfs))
+        all_docs.extend(_chunk_pdfs(pdfs, user_id))
     
     # Process DOCX files
     if docxs:
-        all_docs.extend(_chunk_docx(docxs))
+        all_docs.extend(_chunk_docx(docxs, user_id))
     
     # Process PPTX files
     if pptxs:
-        all_docs.extend(_chunk_pptx(pptxs))
+        all_docs.extend(_chunk_pptx(pptxs, user_id))
     
     # Process images
     if images:
-        all_docs.extend(_chunk_images(images))
+        all_docs.extend(_chunk_images(images, user_id))
     
     # Process CSV files (generic, no assumptions)
     csv_count = 0
@@ -425,11 +465,11 @@ async def ingest_files(
         all_docs.extend(docs)
         table_name = f"{path.stem}"
         ingestion_logger.info(f"📊 Registering table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
-        _register_dataframe("spreadsheet", table_name, df, structure)
+        _register_dataframe("spreadsheet", table_name, df, structure, user_id=user_id)
         csv_count += 1
         
         # Verify registration
-        registered_df = data_registry.get("spreadsheet", table_name)
+        registered_df = user_registry.get("spreadsheet", table_name, user_id=user_id)
         if registered_df is not None:
             ingestion_logger.info(f"✅ Successfully registered table '{table_name}'")
         else:
@@ -451,11 +491,11 @@ async def ingest_files(
             table_name = f"{path.stem}_{sheet_name}"
             structure = structures.get(sheet_name, {})
             ingestion_logger.info(f"📊 Registering table '{table_name}' (sheet: {sheet_name}) with {len(df)} rows, {len(df.columns)} columns")
-            _register_dataframe("spreadsheet", table_name, df, structure)
+            _register_dataframe("spreadsheet", table_name, df, structure, user_id=user_id)
             excel_count += 1
             
             # Verify registration
-            registered_df = data_registry.get("spreadsheet", table_name)
+            registered_df = user_registry.get("spreadsheet", table_name, user_id=user_id)
             if registered_df is not None:
                 ingestion_logger.info(f"✅ Successfully registered table '{table_name}'")
             else:
@@ -467,13 +507,14 @@ async def ingest_files(
         file_registry[file_id]["structures"] = structures
     
     # Save file registry
-    _save_file_registry(file_registry)
+    _save_file_registry(file_registry, user_id)
     
     # Add all documents to vectorstore
     added = manager.add_documents(all_docs) if all_docs else 0
     
     # Log final registry state
-    final_summary = data_registry.summary()
+    user_registry = get_data_registry(user_id)
+    final_summary = user_registry.summary(user_id=user_id)
     ingestion_logger.info(f"📊 Final registry summary: {final_summary}")
     ingestion_logger.info(f"📊 Total tables registered: {sum(len(tables) for tables in final_summary.values())}")
     
@@ -495,27 +536,77 @@ async def ingest_payload(
     pdf_files: Iterable[UploadFile],
     materials_files: Iterable[UploadFile],
     workforce_files: Iterable[UploadFile],
-    manager: VectorStoreManager = vector_manager,
+    user_id: int,
+    manager: Optional[VectorStoreManager] = None,
 ) -> dict:
     """Legacy function for backward compatibility."""
     all_files = list(pdf_files) + list(materials_files) + list(workforce_files)
-    return await ingest_files(all_files, manager)
+    return await ingest_files(all_files, user_id, manager)
 
 
-def reload_tables_from_registry() -> int:
-    """Reload all spreadsheet tables from the file registry."""
+def reload_tables_from_registry(user_id: int, data_registry_instance: Optional[Any] = None) -> int:
+    """Reload all spreadsheet tables from the file registry for a specific user."""
     import logging
     ingestion_logger = logging.getLogger(__name__)
     
-    registry = _load_file_registry()
+    registry = _load_file_registry(user_id)
     reloaded_count = 0
     
-    ingestion_logger.info(f"🔄 Reloading tables from registry ({len(registry)} files)...")
+    ingestion_logger.info(f"🔄 Reloading tables from registry for user {user_id} ({len(registry)} files)...")
+    
+    # Use provided registry instance or get a new one
+    if data_registry_instance is None:
+        from .tools import get_data_registry
+        data_registry_instance = get_data_registry(user_id, reload=False)
+    
+    # Get user email to find the correct user folder
+    from .auth import get_user_by_id
+    user = get_user_by_id(user_id)
+    user_email = None
+    if user:
+        user_email = user.get("email", "").replace("@", "_at_").replace(".", "_")
     
     for file_id, metadata in registry.items():
-        file_path = UPLOAD_ROOT / file_id
-        if not file_path.exists():
+        # CRITICAL: Only reload files for this user - strict check
+        if metadata.get("user_id") != user_id:
+            ingestion_logger.debug(f"⏭️  Skipping file {file_id} - belongs to user {metadata.get('user_id')}, not {user_id}")
             continue
+            
+        file_path = UPLOAD_ROOT / file_id
+        
+        # If file doesn't exist at the expected path, try to find it ONLY in current user's folder
+        if not file_path.exists():
+            file_name = Path(file_id).name
+            
+            # Only search in the current user's folder (by email or user_id)
+            user_folders_to_check = []
+            if user_email:
+                user_folders_to_check.append(f"user_{user_email}")
+            # Also check old format for backward compatibility
+            user_folders_to_check.append(f"user_{user_id}")
+            
+            found = False
+            for folder_name in user_folders_to_check:
+                user_folder = UPLOAD_ROOT / folder_name
+                if user_folder.exists() and user_folder.is_dir():
+                    # Search in timestamp subdirectories
+                    for timestamp_dir in user_folder.iterdir():
+                        if timestamp_dir.is_dir():
+                            potential_file = timestamp_dir / file_name
+                            if potential_file.exists():
+                                file_path = potential_file
+                                found = True
+                                ingestion_logger.info(f"📁 Found file in {folder_name}/{timestamp_dir.name}/")
+                                break
+                        if found:
+                            break
+                if found:
+                    break
+            
+            # If still not found, skip this file - don't search other users' folders
+            if not file_path.exists():
+                ingestion_logger.warning(f"⚠️  File not found for user {user_id}: {file_id}, skipping...")
+                continue
         
         file_type = metadata.get("type")
         if file_type == "csv":
@@ -523,7 +614,7 @@ def reload_tables_from_registry() -> int:
                 ingestion_logger.info(f"📄 Reloading CSV: {file_path.name}")
                 _, df, structure = _csv_documents(file_path, "csv")  # Ignore docs, we don't embed CSV
                 table_name = metadata.get("table_name") or file_path.stem
-                _register_dataframe("spreadsheet", table_name, df, structure)
+                data_registry_instance.register("spreadsheet", table_name, df, structure, user_id=user_id)
                 reloaded_count += 1
                 ingestion_logger.info(f"✅ Reloaded table '{table_name}'")
             except Exception as e:
@@ -536,7 +627,7 @@ def reload_tables_from_registry() -> int:
                 for sheet_name, df in sheets.items():
                     table_name = f"{file_path.stem}_{sheet_name}"
                     structure = structures.get(sheet_name, {})
-                    _register_dataframe("spreadsheet", table_name, df, structure)
+                    data_registry_instance.register("spreadsheet", table_name, df, structure, user_id=user_id)
                     reloaded_count += 1
                     ingestion_logger.info(f"✅ Reloaded table '{table_name}'")
             except Exception as e:
@@ -546,13 +637,13 @@ def reload_tables_from_registry() -> int:
     return reloaded_count
 
 
-def get_uploaded_files() -> List[Dict[str, Any]]:
-    """Get list of all uploaded files with metadata."""
-    registry = _load_file_registry()
+def get_uploaded_files(user_id: int) -> List[Dict[str, Any]]:
+    """Get list of all uploaded files with metadata for a specific user."""
+    registry = _load_file_registry(user_id)
     files = []
     for file_id, metadata in registry.items():
         file_path = UPLOAD_ROOT / file_id
-        if file_path.exists():
+        if file_path.exists() and metadata.get("user_id") == user_id:
             files.append({
                 "id": file_id,
                 **metadata,
@@ -560,13 +651,22 @@ def get_uploaded_files() -> List[Dict[str, Any]]:
     return sorted(files, key=lambda x: x.get("uploaded_at", ""), reverse=True)
 
 
-def delete_file(file_id: str, manager: VectorStoreManager = vector_manager) -> bool:
+def delete_file(file_id: str, user_id: int, manager: Optional[VectorStoreManager] = None) -> bool:
     """Delete a file and remove it from registry, data registry, and vectorstore."""
     import logging
     ingestion_logger = logging.getLogger(__name__)
     
-    registry = _load_file_registry()
+    # Create user-specific vectorstore manager if not provided
+    if manager is None:
+        from .vectorstore import get_vector_manager
+        manager = get_vector_manager(user_id)
+    
+    registry = _load_file_registry(user_id)
     if file_id not in registry:
+        return False
+    
+    # Verify the file belongs to this user
+    if registry[file_id].get("user_id") != user_id:
         return False
     
     file_path = UPLOAD_ROOT / file_id
@@ -583,15 +683,16 @@ def delete_file(file_id: str, manager: VectorStoreManager = vector_manager) -> b
     
     # Remove from data registry if it's a spreadsheet
     if metadata.get("type") in ["csv", "excel"]:
+        user_registry = get_data_registry(user_id)
         table_name = metadata.get("table_name")
         if table_name:
-            data_registry.unregister("spreadsheet", table_name)
+            user_registry.unregister("spreadsheet", table_name, user_id=user_id)
             ingestion_logger.info(f"✅ Removed table '{table_name}' from data registry")
         elif metadata.get("type") == "excel":
             # Remove all sheets
             for sheet_name in metadata.get("sheets", []):
                 table_name = f"{Path(file_id).stem}_{sheet_name}"
-                data_registry.unregister("spreadsheet", table_name)
+                user_registry.unregister("spreadsheet", table_name, user_id=user_id)
                 ingestion_logger.info(f"✅ Removed table '{table_name}' from data registry")
     
     # Delete from vectorstore by filename and path
@@ -610,16 +711,24 @@ def delete_file(file_id: str, manager: VectorStoreManager = vector_manager) -> b
     
     # Remove from file registry
     del registry[file_id]
-    _save_file_registry(registry)
+    _save_file_registry(registry, user_id)
     ingestion_logger.info(f"✅ Removed file from registry")
     
     return True
 
 
-def reset_uploads() -> None:
-    """Remove all uploaded files and reset registry/vectorstore."""
+def reset_uploads(user_id: Optional[int] = None) -> None:
+    """Remove all uploaded files and reset registry/vectorstore.
+    
+    Args:
+        user_id: If provided, only resets data for that user. Otherwise resets all.
+    """
     if UPLOAD_ROOT.exists():
         shutil.rmtree(UPLOAD_ROOT)
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-    data_registry.clear_all()
-    vector_manager.clear()
+    if user_id is not None:
+        data_registry.clear_all(user_id=user_id)
+        # Note: VectorStoreManager is per-user, so clearing is handled per user
+        # This function is mainly for testing/cleanup
+    else:
+        data_registry.clear_all()

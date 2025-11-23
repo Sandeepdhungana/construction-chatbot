@@ -20,8 +20,8 @@ from langchain_core.messages import ToolMessage
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-from .tools import build_tools, data_registry
-from .vectorstore import vector_manager
+from .tools import build_tools, get_data_registry
+from .vectorstore import get_vector_manager
 
 # Configure logging
 logging.basicConfig(
@@ -216,9 +216,21 @@ class AgentOrchestrator:
     Based on: https://docs.langchain.com/oss/python/langchain/agents
     """
 
-    def __init__(self) -> None:
+    def __init__(self, user_id: Optional[int] = None) -> None:
+        self.user_id = user_id
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.0)
-        self.tools = build_tools(self.llm, vector_manager)
+        
+        # Create user-specific vectorstore and registry
+        if user_id is not None:
+            vector_manager = get_vector_manager(user_id)
+            data_registry = get_data_registry(user_id)
+        else:
+            # Fallback for backward compatibility (should not be used in production)
+            from .vectorstore import VectorStoreManager
+            from .tools import data_registry
+            vector_manager = VectorStoreManager(user_id=0)  # Default user
+        
+        self.tools = build_tools(self.llm, vector_manager, data_registry, user_id)
         
         # Log available tools
         logger.info("=" * 80)
@@ -235,13 +247,24 @@ class AgentOrchestrator:
             tools=self.tools,
         )
         
-        # Store conversation history per session
+        # Store conversation history per session (scoped by user_id)
         self._conversations: Dict[str, List] = {}
         
         # Enhanced system message with autonomous decision-making guidance
         self.system_message = (
             "You are ConstructionBot, an intelligent construction compliance and planning analyst "
             "with autonomous decision-making capabilities.\n\n"
+            
+            "⚠️ CRITICAL RESTRICTION: ONLY USE INFORMATION FROM AVAILABLE DOCUMENTS AND DATA ⚠️\n"
+            "ABSOLUTE RULE: You MUST ONLY answer questions using information found in:\n"
+            "- Uploaded CSV/Excel spreadsheets (via List_Available_Tables and Generic_Spreadsheet_Query_Tool)\n"
+            "- Payment system data (via List_Payments, Get_Payments_Due_Soon, Get_Overdue_Payments)\n"
+            "- Uploaded documents (PDFs, DOCX, PPTX, images via document retrieval tools)\n"
+            "NEVER use your general knowledge or training data to answer questions.\n"
+            "If you cannot find the answer in the available documents/data after searching ALL sources, "
+            "you MUST respond with: 'I don't have that information in the available documents and data. "
+            "Please upload the relevant documents or data if you'd like me to answer this question.'\n"
+            "DO NOT make up answers or use information from outside the available documents.\n\n"
             
             "CRITICAL: COMPREHENSIVE MULTI-SOURCE SEARCH - SEARCH ALL DATA SOURCES BEFORE RESPONDING\n"
             "MANDATORY RULE: For ANY question, you MUST search ALL relevant data sources BEFORE responding:\n"
@@ -489,7 +512,7 @@ class AgentOrchestrator:
             ]
         return self._conversations[session_id]
 
-    def run(self, message: str, session_id: str) -> str:
+    def run(self, message: str, session_id: str, user_id: Optional[int] = None) -> str:
         """
         Run the agent with a message and return the response.
         
@@ -512,12 +535,15 @@ class AgentOrchestrator:
         # Enhance user message with explicit multi-source search instructions
         enhanced_message = (
             f"{message}\n\n"
+            "CRITICAL: You MUST ONLY use information from available documents and data sources. "
+            "If the answer is not found in uploaded documents/data, you MUST say 'I don't have that information in the available documents and data.'\n\n"
             "IMPORTANT: Before responding, you MUST search ALL available data sources:\n"
             "1. Call List_Available_Tables to check CSV/Excel data\n"
             "2. If CSV/Excel tables exist, call Generic_Spreadsheet_Query_Tool with the question\n"
             "3. Call relevant payment tools (List_Payments)\n"
             "4. Call General_Document_Retriever to search documents\n"
-            "5. Only respond after searching ALL sources. Do not skip CSV/Excel searches."
+            "5. Only respond after searching ALL sources. Do not skip CSV/Excel searches.\n"
+            "6. If no relevant information is found after searching ALL sources, say 'I don't have that information in the available documents and data.'"
         )
         
         # Log conversation context
@@ -529,7 +555,14 @@ class AgentOrchestrator:
         conversation.append(HumanMessage(content=enhanced_message))
         
         # Log available data
-        tables_info = data_registry.list_all_tables()
+        uid = user_id or self.user_id
+        if uid is not None:
+            from .tools import get_data_registry
+            user_registry = get_data_registry(uid)
+            tables_info = user_registry.list_all_tables(user_id=uid)
+        else:
+            from .tools import data_registry
+            tables_info = data_registry.list_all_tables()
         if tables_info:
             logger.info("📊 Available Data Tables:")
             for category, tables in tables_info.items():
@@ -596,4 +629,11 @@ class AgentOrchestrator:
         return output
 
 
+# Global orchestrator instance (backward compatibility)
+# In production, create per-user instances: AgentOrchestrator(user_id=user_id)
 agent_orchestrator = AgentOrchestrator()
+
+# Function to get user-specific orchestrator
+def get_agent_orchestrator(user_id: int) -> AgentOrchestrator:
+    """Get an AgentOrchestrator instance for a specific user."""
+    return AgentOrchestrator(user_id=user_id)

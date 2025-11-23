@@ -1,6 +1,232 @@
 const API_BASE = "";
 let sessionId = window.localStorage.getItem("constructionbot-session") || null;
 let selectedFiles = [];
+let authToken = localStorage.getItem("constructionbot-token") || null;
+let currentUser = JSON.parse(localStorage.getItem("constructionbot-user") || "null");
+
+// Authentication state
+function isAuthenticated() {
+    return authToken !== null && currentUser !== null;
+}
+
+// API helper with authentication
+async function apiCall(endpoint, options = {}) {
+    // Always get the latest token from localStorage in case it was updated
+    const token = localStorage.getItem("constructionbot-token") || authToken;
+    
+    const headers = {
+        ...options.headers,
+    };
+    
+    // Don't set Content-Type for FormData (browser will set it with boundary)
+    if (!(options.body instanceof FormData)) {
+        headers["Content-Type"] = headers["Content-Type"] || "application/json";
+    }
+    
+    if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+    }
+    
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+    });
+    
+    if (response.status === 401) {
+        // Token expired or invalid
+        logout();
+        return null;
+    }
+    
+    return response;
+}
+
+// Initialize authentication
+function initAuth() {
+    if (isAuthenticated()) {
+        showApp();
+        updateUserInfo();
+    } else {
+        showAuthModal();
+    }
+}
+
+function showAuthModal() {
+    document.getElementById("auth-modal").style.display = "flex";
+    document.getElementById("app-wrapper").style.display = "none";
+}
+
+function showApp() {
+    document.getElementById("auth-modal").style.display = "none";
+    document.getElementById("app-wrapper").style.display = "flex";
+}
+
+function updateUserInfo() {
+    if (currentUser) {
+        document.getElementById("user-name").textContent = currentUser.name || currentUser.email.split("@")[0];
+        document.getElementById("user-email").textContent = currentUser.email;
+        document.getElementById("user-info").style.display = "flex";
+    }
+}
+
+function logout() {
+    authToken = null;
+    currentUser = null;
+    sessionId = null;
+    localStorage.removeItem("constructionbot-token");
+    localStorage.removeItem("constructionbot-user");
+    localStorage.removeItem("constructionbot-session");
+    showAuthModal();
+    // Clear messages
+    if (messagesEl) {
+        messagesEl.innerHTML = "";
+    }
+}
+
+// Login handler
+document.addEventListener("DOMContentLoaded", () => {
+    const loginForm = document.getElementById("login-form");
+    const registerForm = document.getElementById("register-form");
+    const switchToRegister = document.getElementById("switch-to-register");
+    const switchToLogin = document.getElementById("switch-to-login");
+    const logoutBtn = document.getElementById("logout-btn");
+    const authTitle = document.getElementById("auth-title");
+    const authSubtitle = document.getElementById("auth-subtitle");
+    
+    // Switch between login and register
+    function showRegisterForm() {
+        if (loginForm) {
+            loginForm.classList.remove("active");
+            loginForm.style.display = "none";
+        }
+        if (registerForm) {
+            registerForm.classList.add("active");
+            registerForm.style.display = "block";
+        }
+        if (authTitle) authTitle.textContent = "Create Your Account";
+        if (authSubtitle) authSubtitle.textContent = "Get started with ConstructionBot";
+    }
+    
+    function showLoginForm() {
+        if (registerForm) {
+            registerForm.classList.remove("active");
+            registerForm.style.display = "none";
+        }
+        if (loginForm) {
+            loginForm.classList.add("active");
+            loginForm.style.display = "block";
+        }
+        if (authTitle) authTitle.textContent = "Welcome to ConstructionBot";
+        if (authSubtitle) authSubtitle.textContent = "Sign in to access your workspace";
+    }
+    
+    if (switchToRegister) {
+        switchToRegister.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            showRegisterForm();
+            return false;
+        };
+    }
+    
+    if (switchToLogin) {
+        switchToLogin.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            showLoginForm();
+            return false;
+        };
+    }
+    
+    // Login form submission
+    loginForm?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("login-email").value;
+        const password = document.getElementById("login-password").value;
+        const errorEl = document.getElementById("login-error");
+        
+        errorEl.textContent = "";
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/auth/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                authToken = data.access_token;
+                currentUser = data.user;
+                localStorage.setItem("constructionbot-token", authToken);
+                localStorage.setItem("constructionbot-user", JSON.stringify(currentUser));
+                // Reload page to ensure everything initializes properly
+                window.location.reload();
+            } else {
+                errorEl.textContent = data.detail || "Invalid email or password";
+            }
+        } catch (error) {
+            errorEl.textContent = "Network error. Please try again.";
+        }
+    });
+    
+    // Register form submission
+    registerForm?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const name = document.getElementById("register-name").value;
+        const email = document.getElementById("register-email").value;
+        const password = document.getElementById("register-password").value;
+        const confirm = document.getElementById("register-confirm").value;
+        const errorEl = document.getElementById("register-error");
+        
+        errorEl.textContent = "";
+        
+        if (password !== confirm) {
+            errorEl.textContent = "Passwords do not match";
+            return;
+        }
+        
+        if (password.length < 6) {
+            errorEl.textContent = "Password must be at least 6 characters";
+            return;
+        }
+        
+        if (password.length > 72) {
+            errorEl.textContent = "Password cannot be longer than 72 characters";
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/auth/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password, name: name || null }),
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                authToken = data.access_token;
+                currentUser = data.user;
+                localStorage.setItem("constructionbot-token", authToken);
+                localStorage.setItem("constructionbot-user", JSON.stringify(currentUser));
+                // Reload page to ensure everything initializes properly
+                window.location.reload();
+            } else {
+                errorEl.textContent = data.detail || "Registration failed. Please try again.";
+            }
+        } catch (error) {
+            errorEl.textContent = "Network error. Please try again.";
+        }
+    });
+    
+    // Logout handler
+    logoutBtn?.addEventListener("click", logout);
+    
+    // Initialize auth on page load
+    initAuth();
+});
 
 // DOM Elements
 const navButtons = document.querySelectorAll(".nav-button");
@@ -188,12 +414,12 @@ uploadForm.addEventListener("submit", async (event) => {
     selectedFiles.forEach(file => formData.append("files", file));
 
     try {
-        const response = await fetch(`${API_BASE}/api/upload`, {
+        const response = await apiCall(`/api/upload`, {
             method: "POST",
             body: formData,
         });
 
-        if (!response.ok) {
+        if (!response || !response.ok) {
             const errorText = await response.text();
             throw new Error(errorText);
         }
@@ -241,7 +467,7 @@ function showUploadStatus(message, type) {
 // File Management
 async function loadFiles() {
     try {
-        const response = await fetch(`${API_BASE}/api/files`);
+        const response = await apiCall(`/api/files`);
         if (!response.ok) throw new Error("Failed to load files");
         const data = await response.json();
         displayFiles(data.files);
@@ -283,7 +509,7 @@ function displayFiles(files) {
             const fileId = e.target.dataset.fileId;
             if (confirm("Are you sure you want to delete this file?")) {
                 try {
-                    const response = await fetch(`${API_BASE}/api/files/${encodeURIComponent(fileId)}`, {
+                    const response = await apiCall(`/api/files/${encodeURIComponent(fileId)}`, {
                         method: "DELETE",
                     });
                     if (!response.ok) throw new Error("Failed to delete file");
@@ -368,7 +594,7 @@ chatForm.addEventListener("submit", async (event) => {
     const loadingBubble = appendMessage("ai", "Thinking...", true);
 
     try {
-        const response = await fetch(`${API_BASE}/chat`, {
+        const response = await apiCall(`/chat`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -379,7 +605,7 @@ chatForm.addEventListener("submit", async (event) => {
             }),
         });
         
-        if (!response.ok) {
+        if (!response || !response.ok) {
             const errorText = await response.text();
             throw new Error(errorText);
         }
@@ -462,12 +688,12 @@ document.getElementById("smtp-form")?.addEventListener("submit", async (e) => {
     try {
         const url = id ? `/api/notifications/smtp/${id}` : "/api/notifications/smtp";
         const method = id ? "PUT" : "POST";
-        const response = await fetch(url, {
+        const response = await apiCall(url, {
             method,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data)
         });
-        if (response.ok) {
+        if (response && response.ok) {
             smtpModal.classList.remove("active");
             loadSMTPConfigs();
         } else {
@@ -480,7 +706,11 @@ document.getElementById("smtp-form")?.addEventListener("submit", async (e) => {
 
 async function loadSMTPConfigs() {
     try {
-        const response = await fetch("/api/notifications/smtp");
+        const response = await apiCall("/api/notifications/smtp");
+        if (!response || !response.ok) {
+            console.error("Failed to load SMTP configs:", response?.status);
+            return;
+        }
         const data = await response.json();
         smtpList.innerHTML = data.configs.length === 0 
             ? "<div class='empty-state'><p>No SMTP configurations. Add one to get started.</p></div>"
@@ -501,7 +731,7 @@ async function loadSMTPConfigs() {
 }
 
 window.editSMTP = async function(id) {
-    const response = await fetch(`/api/notifications/smtp/${id}`);
+    const response = await apiCall(`/api/notifications/smtp/${id}`);
     const data = await response.json();
     const config = data.config;
     document.getElementById("smtp-id").value = id;
@@ -520,7 +750,7 @@ window.editSMTP = async function(id) {
 window.deleteSMTP = async function(id) {
     if (!confirm("Delete this SMTP configuration?")) return;
     try {
-        const response = await fetch(`/api/notifications/smtp/${id}`, { method: "DELETE" });
+        const response = await apiCall(`/api/notifications/smtp/${id}`, { method: "DELETE" });
         if (response.ok) loadSMTPConfigs();
     } catch (error) {
         alert("Error deleting SMTP config");
@@ -561,12 +791,12 @@ document.getElementById("recipient-form")?.addEventListener("submit", async (e) 
     try {
         const url = id ? `/api/notifications/recipients/${id}` : "/api/notifications/recipients";
         const method = id ? "PUT" : "POST";
-        const response = await fetch(url, {
+        const response = await apiCall(url, {
             method,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data)
         });
-        if (response.ok) {
+        if (response && response.ok) {
             recipientModal.classList.remove("active");
             loadRecipients();
         } else {
@@ -581,7 +811,8 @@ async function loadRecipients() {
     try {
         const type = recipientTypeFilter?.value || "";
         const url = type ? `/api/notifications/recipients?type=${type}` : "/api/notifications/recipients";
-        const response = await fetch(url);
+        const response = await apiCall(url);
+        if (!response) return;
         const data = await response.json();
         recipientsList.innerHTML = data.recipients.length === 0
             ? "<div class='empty-state'><p>No recipients. Add one to get started.</p></div>"
@@ -605,7 +836,7 @@ async function loadRecipients() {
 
 async function loadSMTPConfigsForSelect() {
     try {
-        const response = await fetch("/api/notifications/smtp");
+        const response = await apiCall("/api/notifications/smtp");
         const data = await response.json();
         const select = document.getElementById("recipient-smtp-config");
         select.innerHTML = '<option value="">Use Default</option>' +
@@ -616,7 +847,7 @@ async function loadSMTPConfigsForSelect() {
 }
 
 window.editRecipient = async function(id) {
-    const response = await fetch(`/api/notifications/recipients/${id}`);
+    const response = await apiCall(`/api/notifications/recipients/${id}`);
     const data = await response.json();
     const rec = data.recipient;
     document.getElementById("recipient-id").value = id;
@@ -638,7 +869,7 @@ window.editRecipient = async function(id) {
 window.deleteRecipient = async function(id) {
     if (!confirm("Delete this recipient?")) return;
     try {
-        const response = await fetch(`/api/notifications/recipients/${id}`, { method: "DELETE" });
+        const response = await apiCall(`/api/notifications/recipients/${id}`, { method: "DELETE" });
         if (response.ok) loadRecipients();
     } catch (error) {
         alert("Error deleting recipient");
@@ -649,7 +880,7 @@ window.sendNotificationToRecipient = async function(id) {
     const type = prompt("Notification type (payment_reminder, payment_request, custom):", "payment_reminder");
     if (!type) return;
     try {
-        const response = await fetch("/api/notifications/send", {
+        const response = await apiCall("/api/notifications/send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -720,12 +951,16 @@ document.getElementById("schedule-form")?.addEventListener("submit", async (e) =
 
 async function loadSchedules() {
     try {
-        const response = await fetch("/api/notifications/schedules");
+        const response = await apiCall("/api/notifications/schedules");
+        if (!response || !response.ok) {
+            console.error("Failed to load schedules:", response?.status);
+            return;
+        }
         const data = await response.json();
         schedulesList.innerHTML = data.schedules.length === 0
             ? "<div class='empty-state'><p>No schedules. Create one to get started.</p></div>"
             : await Promise.all(data.schedules.map(async sched => {
-                const recResponse = await fetch(`/api/notifications/recipients/${sched.recipient_id}`);
+                const recResponse = await apiCall(`/api/notifications/recipients/${sched.recipient_id}`);
                 const recData = await recResponse.json();
                 const recipient = recData.recipient;
                 
@@ -733,7 +968,8 @@ async function loadSchedules() {
                 let paymentInfo = "";
                 if (sched.payment_id) {
                     try {
-                        const paymentResponse = await fetch(`/api/erp/payments/${sched.payment_id}`);
+                        const paymentResponse = await apiCall(`/api/erp/payments/${sched.payment_id}`);
+                        if (!paymentResponse || !paymentResponse.ok) return null;
                         const paymentData = await paymentResponse.json();
                         const payment = paymentData.payment;
                         paymentInfo = `<p><strong>💳 Payment:</strong> $${parseFloat(payment.amount).toLocaleString('en-US', {minimumFractionDigits: 2})} - Due: ${payment.due_date}</p>`;
@@ -778,7 +1014,7 @@ async function loadSchedules() {
 
 async function loadRecipientsForSelect() {
     try {
-        const response = await fetch("/api/notifications/recipients");
+        const response = await apiCall("/api/notifications/recipients");
         const data = await response.json();
         const select = document.getElementById("schedule-recipient");
         select.innerHTML = '<option value="">Select Recipient</option>' +
@@ -789,7 +1025,7 @@ async function loadRecipientsForSelect() {
 }
 
 window.editSchedule = async function(id) {
-    const response = await fetch(`/api/notifications/schedules/${id}`);
+    const response = await apiCall(`/api/notifications/schedules/${id}`);
     const data = await response.json();
     const sched = data.schedule;
     document.getElementById("schedule-id").value = id;
@@ -809,7 +1045,7 @@ window.editSchedule = async function(id) {
 window.deleteSchedule = async function(id) {
     if (!confirm("Delete this schedule? This will remove all reminder notifications for this schedule.")) return;
     try {
-        const response = await fetch(`/api/notifications/schedules/${id}`, { method: "DELETE" });
+        const response = await apiCall(`/api/notifications/schedules/${id}`, { method: "DELETE" });
         if (response.ok) {
             loadSchedules();
             // Also reload payments if we're in ERP view to update button states
@@ -826,7 +1062,7 @@ window.deleteSchedule = async function(id) {
 
 window.sendScheduleNotification = async function(id) {
     try {
-        const response = await fetch("/api/notifications/send", {
+        const response = await apiCall("/api/notifications/send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -854,12 +1090,17 @@ document.getElementById("refresh-history-btn")?.addEventListener("click", () => 
 
 async function loadHistory() {
     try {
-        const response = await fetch("/api/notifications/history?limit=50");
+        const response = await apiCall("/api/notifications/history?limit=50");
+        if (!response || !response.ok) {
+            console.error("Failed to load history:", response?.status);
+            return;
+        }
         const data = await response.json();
         historyList.innerHTML = data.history.length === 0
             ? "<div class='empty-state'><p>No notification history.</p></div>"
             : await Promise.all(data.history.map(async entry => {
-                const recResponse = await fetch(`/api/notifications/recipients/${entry.recipient_id}`);
+                const recResponse = await apiCall(`/api/notifications/recipients/${entry.recipient_id}`);
+                if (!recResponse || !recResponse.ok) return null;
                 const recData = await recResponse.json();
                 const recipient = recData.recipient;
                 const statusIcon = entry.status === "sent" ? "✅" : "❌";
@@ -915,7 +1156,7 @@ erpTabs.forEach(tab => {
 document.getElementById("generate-mock-data-btn")?.addEventListener("click", async () => {
     if (!confirm("Generate mock payment data? This will add sample payments.")) return;
     try {
-        const response = await fetch("/api/erp/generate-mock-data", { method: "POST" });
+        const response = await apiCall("/api/erp/generate-mock-data", { method: "POST" });
         const data = await response.json();
         if (data.success) {
             alert("Mock data generated successfully!");
@@ -1048,12 +1289,12 @@ document.getElementById("payment-form")?.addEventListener("submit", async (e) =>
     try {
         const url = id ? `/api/erp/payments/${id}` : "/api/erp/payments";
         const method = id ? "PUT" : "POST";
-        const response = await fetch(url, {
+        const response = await apiCall(url, {
             method,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data)
         });
-        if (response.ok) {
+        if (response && response.ok) {
             document.getElementById("payment-modal").classList.remove("active");
             loadPayments();
         } else {
@@ -1074,17 +1315,22 @@ async function loadPayments() {
         if (type) url += `payment_type=${type}&`;
         if (status) url += `status=${status}&`;
         
-        const response = await fetch(url);
+        const response = await apiCall(url);
+        if (!response) return;
         const data = await response.json();
         
         // Update stats
-        const dueSoonResponse = await fetch("/api/erp/payments/due-soon?days=7");
-        const dueSoonData = await dueSoonResponse.json();
-        document.getElementById("due-soon-count").textContent = dueSoonData.count || 0;
+        const dueSoonResponse = await apiCall("/api/erp/payments/due-soon?days=7");
+        if (dueSoonResponse) {
+            const dueSoonData = await dueSoonResponse.json();
+            document.getElementById("due-soon-count").textContent = dueSoonData.count || 0;
+        }
         
-        const overdueResponse = await fetch("/api/erp/payments/overdue");
-        const overdueData = await overdueResponse.json();
-        document.getElementById("overdue-count").textContent = overdueData.count || 0;
+        const overdueResponse = await apiCall("/api/erp/payments/overdue");
+        if (overdueResponse) {
+            const overdueData = await overdueResponse.json();
+            document.getElementById("overdue-count").textContent = overdueData.count || 0;
+        }
         
         const getEntityName = (payment) => {
             // Use client_name if available, otherwise fallback to entity_type
@@ -1108,7 +1354,7 @@ async function loadPayments() {
             filteredPayments.map(async (p) => {
                 if (p.status === 'pending' || p.status === 'partial') {
                     try {
-                        const remindersResponse = await fetch(`/api/erp/payments/${p.id}/reminders`);
+                        const remindersResponse = await apiCall(`/api/erp/payments/${p.id}/reminders`);
                         const remindersData = await remindersResponse.json();
                         return { ...p, hasReminders: remindersData.exists };
                     } catch (e) {
@@ -1159,7 +1405,7 @@ async function loadPayments() {
 }
 
 window.editPayment = async function(id) {
-    const response = await fetch(`/api/erp/payments/${id}`);
+    const response = await apiCall(`/api/erp/payments/${id}`);
     const data = await response.json();
     const p = data.payment;
     
@@ -1190,7 +1436,7 @@ window.editPayment = async function(id) {
 window.deletePayment = async function(id) {
     if (!confirm("Delete this payment?")) return;
     try {
-        const response = await fetch(`/api/erp/payments/${id}`, { method: "DELETE" });
+        const response = await apiCall(`/api/erp/payments/${id}`, { method: "DELETE" });
         if (response.ok) loadPayments();
     } catch (error) {
         alert("Error deleting payment");
@@ -1199,12 +1445,12 @@ window.deletePayment = async function(id) {
 
 window.showCreateRemindersModal = async function(paymentId) {
     // Load payment details
-    const paymentResponse = await fetch(`/api/erp/payments/${paymentId}`);
+    const paymentResponse = await apiCall(`/api/erp/payments/${paymentId}`);
     const paymentData = await paymentResponse.json();
     const payment = paymentData.payment;
     
     // Check if reminders already exist
-    const remindersResponse = await fetch(`/api/erp/payments/${paymentId}/reminders`);
+    const remindersResponse = await apiCall(`/api/erp/payments/${paymentId}/reminders`);
     const remindersData = await remindersResponse.json();
     const existingReminders = remindersData.schedules || [];
     
@@ -1251,7 +1497,7 @@ window.createPaymentReminders = async function() {
     }
     
     try {
-        const response = await fetch(`/api/erp/payments/${paymentId}/create-reminders`, {
+        const response = await apiCall(`/api/erp/payments/${paymentId}/create-reminders`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
